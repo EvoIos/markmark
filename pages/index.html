@@ -316,8 +316,8 @@ footer a:hover{color:var(--red-ink)}
     <p class="sub" data-i18n="ft.sub">原生、极小、即开即读——把复杂留给底层，把安静留给你。</p>
     <div class="grid">
       <div class="feat"><div class="ic k">¶</div><h4 data-i18n="feat1.h4">忠实渲染</h4><p data-i18n="feat1.p">Mermaid 图表、KaTeX 公式、30+ 语言代码高亮、表格脚注，关闭智能排版，与源码一字不差。</p></div>
-      <div class="feat"><div class="ic r">✎</div><h4 data-i18n="feat2.h4">原位审阅</h4><p data-i18n="feat2.p">在渲染视图里选词即标：删除 / 替换 / 评论 / 高亮。标注列表面板分组管理，可一键应用或放弃全部标注。</p></div>
-      <div class="feat"><div class="ic g">⧉</div><h4 data-i18n="feat3.h4">复制给 AI</h4><p data-i18n="feat3.p">带标记原文 + 可自定义提示词模板一键入剪贴板；长文只复制有改动的标注片段，省 token 不丢上下文。</p></div>
+      <div class="feat"><div class="ic r">✎</div><h4 data-i18n="feat2.h4">原位审阅</h4><p data-i18n="feat2.p">在渲染视图里选词即标：删除 / 替换 / 评论 / 高亮；鼠标移到段落间点「+」写整段批注。标注列表面板分组管理，可一键应用或放弃全部标注。</p></div>
+      <div class="feat"><div class="ic g">⧉</div><h4 data-i18n="feat3.h4">与 AI 往返</h4><p data-i18n="feat3.p">带标记原文 + 提示词模板一键复制给 AI；AI 改完用 mdr diff 或 git 对比，逐词标出改动，在对比视图上接着批注。</p></div>
       <div class="feat"><div class="ic k">◑</div><h4 data-i18n="feat4.h4">33 套主题</h4><p data-i18n="feat4.p">20 深色 + 13 浅色，含 Markdown Preview Enhanced 风格，可自定义配色与对比度。</p></div>
       <div class="feat"><div class="ic k">⚡</div><h4 data-i18n="feat5.h4">原生 · 极小</h4><p data-i18n="feat5.p">Swift + WKWebView 原生构建，启动快、内存省，Universal 二进制（Intel + Apple Silicon）约 9 MB。Quick Look 预览 + 命令行打开。</p></div>
       <div class="feat"><div class="ic r">♡</div><h4 data-i18n="feat6.h4">免费 · 开源</h4><p data-i18n="feat6.p">MIT 许可，代码全开。fork 自并致敬 davidhoo/MarkdownReader。</p></div>
@@ -434,9 +434,9 @@ const I18N = {
     'feat1.h4': '忠实渲染',
     'feat1.p': 'Mermaid 图表、KaTeX 公式、30+ 语言代码高亮、表格脚注，关闭智能排版，与源码一字不差。',
     'feat2.h4': '原位审阅',
-    'feat2.p': '在渲染视图里选词即标：删除 / 替换 / 评论 / 高亮。标注列表面板分组管理，可一键应用或放弃全部标注。',
-    'feat3.h4': '复制给 AI',
-    'feat3.p': '带标记原文 + 可自定义提示词模板一键入剪贴板；长文只复制有改动的标注片段，省 token 不丢上下文。',
+    'feat2.p': '在渲染视图里选词即标：删除 / 替换 / 评论 / 高亮；鼠标移到段落间点「+」写整段批注。标注列表面板分组管理，可一键应用或放弃全部标注。',
+    'feat3.h4': '与 AI 往返',
+    'feat3.p': '带标记原文 + 提示词模板一键复制给 AI；AI 改完用 mdr diff 或 git 对比，逐词标出改动，在对比视图上接着批注。',
     'feat4.h4': '33 套主题',
     'feat4.p': '20 深色 + 13 浅色，含 Markdown Preview Enhanced 风格，可自定义配色与对比度。',
     'feat5.h4': '原生 · 极小',
@@ -506,9 +506,9 @@ const I18N = {
     'feat1.h4': 'Faithful rendering',
     'feat1.p': 'Mermaid diagrams, KaTeX formulas, 30+ language code highlighting, tables and footnotes — smart typography off, character-for-character faithful to the source.',
     'feat2.h4': 'In-place review',
-    'feat2.p': 'Select text in the rendered view to annotate: delete / replace / comment / highlight. The annotation panel groups them; apply or discard all in one click.',
-    'feat3.h4': 'Copy for AI',
-    'feat3.p': 'Marked-up text plus a customizable prompt template, copied in one click; for long docs, copy only the changed snippets — saving tokens without losing context.',
+    'feat2.p': 'Select text in the rendered view to annotate: delete / replace / comment / highlight — or hover between paragraphs and click “+” to comment on a whole block. The annotation panel groups them; apply or discard all in one click.',
+    'feat3.h4': 'Round-trip with AI',
+    'feat3.p': 'Copy marked-up text plus your prompt template for AI in one click; when it edits the file, see a word-level diff via mdr diff or git and keep annotating right on it.',
     'feat4.h4': '33 themes',
     'feat4.p': '20 dark + 13 light, including Markdown Preview Enhanced styles, with customizable colors and contrast.',
     'feat5.h4': 'Native · tiny',
