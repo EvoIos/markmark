@@ -56,6 +56,8 @@ struct WebViewMarkdownView: NSViewRepresentable {
     var contentPadding: CGFloat = 20
     var maxContentWidthFollowsWindow: Bool = false
     var mathEnabled: Bool = true
+    /// Diff 模式载荷（MarkdownDiff JSON）；nil 表示不在对比模式
+    var diffPayload: String?
     var scrollToLine: Int?
     let themeCSS: String
     var isDark: Bool = true
@@ -130,6 +132,7 @@ struct WebViewMarkdownView: NSViewRepresentable {
 
         private var isLoaded = false
         private var lastLoadedContent = ""
+        private var lastDiffPayload: String?
         private var lastLoadedURL: URL?
         private var lastThemeCSS = ""
         private var lastPadding: CGFloat = -1
@@ -156,7 +159,8 @@ struct WebViewMarkdownView: NSViewRepresentable {
                 maxContentWidthFollowsWindow: parent.maxContentWidthFollowsWindow,
                 baseURL: baseURL,
                 isDark: parent.isDark,
-                mathEnabled: parent.mathEnabled
+                mathEnabled: parent.mathEnabled,
+                diffJSON: parent.diffPayload
             )
             isLoaded = false
             pendingScrollToLine = parent.scrollToLine
@@ -164,6 +168,7 @@ struct WebViewMarkdownView: NSViewRepresentable {
             webView.loadHTMLString(html, baseURL: effectiveBaseURL)
 
             lastLoadedContent = parent.content
+            lastDiffPayload = parent.diffPayload
             lastLoadedURL = parent.fileURL
             lastThemeCSS = parent.themeCSS
             lastPadding = parent.contentPadding
@@ -189,9 +194,10 @@ struct WebViewMarkdownView: NSViewRepresentable {
                 return
             }
 
-            // 内容变化：局部替换（保留滚动与性能）
-            if parent.content != lastLoadedContent {
+            // 内容或 diff 变化：局部替换（保留滚动与性能）
+            if parent.content != lastLoadedContent || parent.diffPayload != lastDiffPayload {
                 lastLoadedContent = parent.content
+                lastDiffPayload = parent.diffPayload
                 replaceContent(parent.content)
             }
 
@@ -243,7 +249,8 @@ struct WebViewMarkdownView: NSViewRepresentable {
             let baseURL = parent.fileURL?.deletingLastPathComponent()
             let renderResult = MarkdownHTMLService.render(content, baseURL: baseURL, mathEnabled: parent.mathEnabled)
             let escaped = Self.escapeForJSString(renderResult.html)
-            eval("MR.replaceContent('\(escaped)')")
+            // diff 载荷本身就是 JSON（合法的 JS 对象字面量），直接作为参数传入
+            eval("MR.replaceContent('\(escaped)', \(parent.diffPayload ?? "null"))")
         }
 
         private func updateThemeCSS(_ themeCSS: String) {

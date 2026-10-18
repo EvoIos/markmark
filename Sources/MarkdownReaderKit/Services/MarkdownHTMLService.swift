@@ -53,7 +53,18 @@ public enum MarkdownHTMLService {
         )
     }
 
-    public static func buildFullHTML(content: String, themeCSS: String, contentPadding: CGFloat, maxContentWidthFollowsWindow: Bool = false, baseURL: URL?, isDark: Bool = true, mathEnabled: Bool = true) -> String {
+    /// Diff 模式载荷：旧块用与正文相同的渲染管线渲染，供 `MR.applyDiff` 叠加标记。
+    public static func diffPayloadJSON(baseline: String, content: String, baseURL: URL?, mathEnabled: Bool = true) -> String? {
+        diffPayload(baseline: baseline, content: content, baseURL: baseURL, mathEnabled: mathEnabled).json
+    }
+
+    public static func diffPayload(baseline: String, content: String, baseURL: URL?, mathEnabled: Bool = true) -> (json: String?, stats: MarkdownDiff.Stats) {
+        MarkdownDiff.payload(old: baseline, new: content) { source in
+            render(source, baseURL: baseURL, mathEnabled: mathEnabled).html
+        }
+    }
+
+    public static func buildFullHTML(content: String, themeCSS: String, contentPadding: CGFloat, maxContentWidthFollowsWindow: Bool = false, baseURL: URL?, isDark: Bool = true, mathEnabled: Bool = true, diffJSON: String? = nil) -> String {
         let renderResult = render(content, baseURL: baseURL, mathEnabled: mathEnabled)
 
         let baseURLAttr = baseURL != nil ? " data-base-url=\"\(baseURL!.path.addingXMLAttributeEscapes)\"" : ""
@@ -87,6 +98,7 @@ public enum MarkdownHTMLService {
             <script>
             Prism.plugins.autoloader.languages_path = 'mr:///js/';
             </script>
+            \(diffJSON.map { "<script>window.MR_DIFF = \($0);</script>" } ?? "")
             <script src="mr:///js/markdown-reader.js" data-is-dark="\(isDark)"></script>
         </body>
         </html>
@@ -399,9 +411,14 @@ public enum MarkdownHTMLService {
 
     private static func stripYAMLFrontMatter(_ content: String) -> String {
         let pattern = #"^---\s*\n[\s\S]*?\n---\s*\n"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return content }
-        let range = NSRange(content.startIndex..., in: content)
-        return regex.stringByReplacingMatches(in: content, options: [], range: range, withTemplate: "")
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []),
+              let match = regex.firstMatch(in: content, options: [], range: NSRange(content.startIndex..., in: content)),
+              let range = Range(match.range, in: content) else { return content }
+        // 用等量换行替换而非直接删除：保持后续 data-line 与源码行号一致（段落批注按行号插入）
+        let newlines = content[range].filter { $0 == "\n" }.count
+        var result = content
+        result.replaceSubrange(range, with: String(repeating: "\n", count: newlines))
+        return result
     }
 }
 
@@ -500,14 +517,13 @@ private struct CustomHTMLFormatter: MarkupWalker {
             lineNumber: lineNumber
         ))
 
-        result += "<h\(heading.level) id=\"\(id)\" data-line=\"\(lineNumber)\">"
+        result += "<h\(heading.level) id=\"\(id)\"\(lineAttrs(heading))>"
         descendInto(heading)
         result += "</h\(heading.level)>\n"
     }
 
     mutating func visitParagraph(_ paragraph: Paragraph) {
-        let lineNumber = paragraph.range?.lowerBound.line ?? 0
-        result += "<p data-line=\"\(lineNumber)\">"
+        result += "<p\(lineAttrs(paragraph))>"
         descendInto(paragraph)
         result += "</p>\n"
     }
@@ -515,49 +531,44 @@ private struct CustomHTMLFormatter: MarkupWalker {
     mutating func visitCodeBlock(_ codeBlock: CodeBlock) {
         let language = codeBlock.language ?? ""
         let languageClass = language.isEmpty ? "" : " class=\"language-\(language.htmlEscaped)\""
-        let lineNumber = codeBlock.range?.lowerBound.line ?? 0
-        result += "<pre data-line=\"\(lineNumber)\"><code\(languageClass)>\(codeBlock.code.htmlEscaped)</code></pre>\n"
+        result += "<pre\(lineAttrs(codeBlock))><code\(languageClass)>\(codeBlock.code.htmlEscaped)</code></pre>\n"
     }
 
     mutating func visitBlockQuote(_ blockQuote: BlockQuote) {
-        let lineNumber = blockQuote.range?.lowerBound.line ?? 0
-        result += "<blockquote data-line=\"\(lineNumber)\">\n"
+        result += "<blockquote\(lineAttrs(blockQuote))>\n"
         descendInto(blockQuote)
         result += "</blockquote>\n"
     }
 
     mutating func visitUnorderedList(_ unorderedList: UnorderedList) {
-        let lineNumber = unorderedList.range?.lowerBound.line ?? 0
-        result += "<ul data-line=\"\(lineNumber)\">\n"
+        result += "<ul\(lineAttrs(unorderedList))>\n"
         descendInto(unorderedList)
         result += "</ul>\n"
     }
 
     mutating func visitOrderedList(_ orderedList: OrderedList) {
-        let lineNumber = orderedList.range?.lowerBound.line ?? 0
-        result += "<ol data-line=\"\(lineNumber)\">\n"
+        result += "<ol\(lineAttrs(orderedList))>\n"
         descendInto(orderedList)
         result += "</ol>\n"
     }
 
     mutating func visitListItem(_ listItem: ListItem) {
         if let checkbox = listItem.checkbox {
-            result += "<li class=\"task-list-item\">"
+            result += "<li class=\"task-list-item\"\(lineAttrs(listItem))>"
             result += "<input type=\"checkbox\" disabled=\"\""
             if checkbox == .checked {
                 result += " checked=\"\""
             }
             result += " /> "
         } else {
-            result += "<li>"
+            result += "<li\(lineAttrs(listItem))>"
         }
         descendInto(listItem)
         result += "</li>\n"
     }
 
     mutating func visitTable(_ table: Table) {
-        let lineNumber = table.range?.lowerBound.line ?? 0
-        result += "<table data-line=\"\(lineNumber)\">\n<thead>\n<tr>\n"
+        result += "<table\(lineAttrs(table))>\n<thead>\n<tr>\n"
         for cell in table.head.cells {
             let align = alignmentAttr(table.columnAlignments[cell.indexInParent])
             result += "<th\(align)>"
@@ -584,8 +595,7 @@ private struct CustomHTMLFormatter: MarkupWalker {
     }
 
     mutating func visitThematicBreak(_ thematicBreak: ThematicBreak) {
-        let lineNumber = thematicBreak.range?.lowerBound.line ?? 0
-        result += "<hr data-line=\"\(lineNumber)\" />\n"
+        result += "<hr\(lineAttrs(thematicBreak)) />\n"
     }
 
     mutating func visitHTMLBlock(_ html: HTMLBlock) {
@@ -652,6 +662,13 @@ private struct CustomHTMLFormatter: MarkupWalker {
 
     mutating func visitInlineHTML(_ inlineHTML: InlineHTML) {
         result += inlineHTML.rawHTML
+    }
+
+    /// 块级元素的源码行号属性：`data-line`（起始行）+ `data-line-end`（末行，段落批注插入点）。
+    private func lineAttrs(_ markup: Markup) -> String {
+        let start = markup.range?.lowerBound.line ?? 0
+        let end = markup.range?.upperBound.line ?? start
+        return " data-line=\"\(start)\" data-line-end=\"\(end)\""
     }
 
     private func alignmentAttr(_ alignment: Table.ColumnAlignment?) -> String {

@@ -198,6 +198,21 @@ public enum L10n {
         case criticCancel
         case criticEdit
         case criticCommentHint
+        case criticBlockComment
+        case criticBlockCommentHint
+        case diffMenu
+        case diffWithGitHead
+        case diffWithSession
+        case diffWithFile
+        case diffExit
+        case diffMarkReviewed
+        case diffBaselineGit
+        case diffBaselineSession
+        case diffBaselineFile
+        case diffNoChanges
+        case diffPrev
+        case diffNext
+        case settingsGeneralCommandLineUpdate
         case criticReplaceHint
         case criticNotFound
 
@@ -439,6 +454,21 @@ public enum L10n {
         .criticCancel: "Cancel",
         .criticEdit: "Edit",
         .criticCommentHint: "Add a comment…",
+        .criticBlockComment: "Comment on this block",
+        .criticBlockCommentHint: "Comment on the block above…",
+        .diffMenu: "Compare Changes",
+        .diffWithGitHead: "Compare with git HEAD",
+        .diffWithSession: "Compare with Version Before External Edits",
+        .diffWithFile: "Compare with File…",
+        .diffExit: "Exit Compare",
+        .diffMarkReviewed: "Mark as Reviewed",
+        .diffBaselineGit: "Comparing with git HEAD",
+        .diffBaselineSession: "Comparing with version from {time}",
+        .diffBaselineFile: "Comparing with {name}",
+        .diffNoChanges: "No changes",
+        .diffPrev: "Previous Change",
+        .diffNext: "Next Change",
+        .settingsGeneralCommandLineUpdate: "Update command line tool (adds mdr diff)",
         .criticReplaceHint: "Replace with…",
         .criticNotFound: "Could not locate the selection in the source",
         .fileModifiedExternallyTitle: "File Modified Externally",
@@ -660,6 +690,21 @@ public enum L10n {
         .criticCancel: "取消",
         .criticEdit: "编辑",
         .criticCommentHint: "输入评论…",
+        .criticBlockComment: "为这一段添加批注",
+        .criticBlockCommentHint: "针对上面这一段的批注…",
+        .diffMenu: "对比改动",
+        .diffWithGitHead: "与 git HEAD 对比",
+        .diffWithSession: "与外部修改前的版本对比",
+        .diffWithFile: "选择文件对比…",
+        .diffExit: "退出对比",
+        .diffMarkReviewed: "标记已读",
+        .diffBaselineGit: "对比 git HEAD",
+        .diffBaselineSession: "对比 {time} 的版本",
+        .diffBaselineFile: "对比 {name}",
+        .diffNoChanges: "没有改动",
+        .diffPrev: "上一处改动",
+        .diffNext: "下一处改动",
+        .settingsGeneralCommandLineUpdate: "更新命令行工具（支持 mdr diff）",
         .criticReplaceHint: "替换为…",
         .criticNotFound: "无法在源码中定位选区（试试只选不跨格式的文字）",
         .fileModifiedExternallyTitle: "文件已被外部修改",
@@ -881,6 +926,21 @@ public enum L10n {
         .criticCancel: "取消",
         .criticEdit: "編輯",
         .criticCommentHint: "輸入評論…",
+        .criticBlockComment: "為這一段新增批註",
+        .criticBlockCommentHint: "針對上面這一段的批註…",
+        .diffMenu: "對比改動",
+        .diffWithGitHead: "與 git HEAD 對比",
+        .diffWithSession: "與外部修改前的版本對比",
+        .diffWithFile: "選擇檔案對比…",
+        .diffExit: "退出對比",
+        .diffMarkReviewed: "標記已讀",
+        .diffBaselineGit: "對比 git HEAD",
+        .diffBaselineSession: "對比 {time} 的版本",
+        .diffBaselineFile: "對比 {name}",
+        .diffNoChanges: "沒有改動",
+        .diffPrev: "上一處改動",
+        .diffNext: "下一處改動",
+        .settingsGeneralCommandLineUpdate: "更新命令列工具（支援 mdr diff）",
         .criticReplaceHint: "替換為…",
         .criticNotFound: "無法在源碼中定位選區（試試只選不跨格式的文字）",
         .fileModifiedExternallyTitle: "檔案已被外部修改",

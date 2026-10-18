@@ -38,20 +38,35 @@
       return false;
     },
 
-    replaceContent(html) {
+    replaceContent(html, diff) {
       const content = document.getElementById('mr-content');
       if (content) {
         content.innerHTML = html;
         MR._searchHighlights = [];
+        // diff 标记必须在 Mermaid / KaTeX / Prism 改写 DOM 之前叠加（逐词 diff 依赖原始文本节点）
+        MR.applyDiff(diff || null);
         MR.renderMermaid();
         MR.renderPlantUML();
         MR.renderKaTeX();
         MR.renderAdmonitions();
+        MR.renderBlockComments();
         MR.addCopyButtons();
+        MR._hideBlockAdd();
         if (typeof Prism !== 'undefined') {
           Prism.highlightAll();
         }
       }
+    },
+
+    // 块级元素被替换为渲染容器时（Mermaid / KaTeX），沿用原块的源码行号，
+    // 否则滚动同步、段落批注插入点会丢失。
+    _copyLineAttrs(from, to) {
+      if (!from || !to || !from.dataset) return;
+      if (from.dataset.line) to.dataset.line = from.dataset.line;
+      if (from.dataset.lineEnd) to.dataset.lineEnd = from.dataset.lineEnd;
+      ['mr-diff-added', 'mr-diff-modified'].forEach(c => {
+        if (from.classList.contains(c)) to.classList.add(c);
+      });
     },
 
     getVisibleHeading() {
@@ -250,6 +265,7 @@
           const detail = (err && err.message) ? String(err.message).substring(0, 200) : String(err).substring(0, 200);
           MR._showMermaidError(container, '渲染失败：' + detail);
         });
+        MR._copyLineAttrs(pre, container);
         pre.replaceWith(container);
       });
     },
@@ -393,6 +409,7 @@
           } catch (e) {
             container.textContent = mathContent;
           }
+          MR._copyLineAttrs(pre, container);
           pre.replaceWith(container);
         }
       });
@@ -738,6 +755,7 @@
     _showCriticToolbar(range, text, line) {
       const bar = MR._ensureCriticToolbar();
       MR._criticPending = { text: text, line: line };
+      MR._criticAnchorRect = null;
       const L = MR.criticLabels;
       bar.innerHTML = '';
 
@@ -786,7 +804,8 @@
 
       // 评论草稿：记录本次输入对应的位置 key，并恢复同一处未提交的草稿（issue #7）。
       // 仅评论启用草稿，replace 不需要。
-      const draftKey = op === 'comment' ? MR._criticDraftKey(MR._criticPending) : null;
+      const isComment = op === 'comment' || op === 'blockComment';
+      const draftKey = isComment ? MR._criticDraftKey(MR._criticPending) : null;
       MR._criticInputDraftKey = draftKey;
       MR._criticDrafts = MR._criticDrafts || {};
       if (draftKey && MR._criticDrafts[draftKey] != null) field.value = MR._criticDrafts[draftKey];
@@ -799,12 +818,12 @@
 
       const submit = () => {
         const v = field.value.trim();
-        if (op === 'comment' && !v) { MR._hideCriticToolbar(); return; }
+        if (isComment && !v) { MR._hideCriticToolbar(); return; }
         // 提交成功 → 清除该位置的草稿
         if (draftKey) delete MR._criticDrafts[draftKey];
         // 评论内的连续空行会破坏 CriticMarkup 行内格式（cmark 会按空行拆段），
         // 提交前自动折叠空行（issue #6）。replace 仅替换正文文本，无需处理。
-        const payload = op === 'comment' ? MR._collapseBlankLines(field.value) : field.value;
+        const payload = isComment ? MR._collapseBlankLines(field.value) : field.value;
         MR._commitCritic(op, payload);
       };
       // 取消/Esc 关闭前先把内容存为草稿（issue #7，方案 3.3）
@@ -826,8 +845,9 @@
       btns.appendChild(confirm);
       bar.appendChild(row);
       bar.appendChild(btns);
-      // 重新定位（输入态尺寸变化）+ 聚焦
-      if (MR._criticRange) MR._positionCriticToolbar(bar, MR._criticRange.getBoundingClientRect());
+      // 重新定位（输入态尺寸变化）+ 聚焦。段落批注没有选区，用「+」按钮位置定位
+      const anchorRect = MR._criticRange ? MR._criticRange.getBoundingClientRect() : MR._criticAnchorRect;
+      if (anchorRect) MR._positionCriticToolbar(bar, anchorRect);
       setTimeout(() => field.focus(), 0);
     },
 
@@ -959,6 +979,492 @@
       setTimeout(() => { field.focus(); field.select(); }, 0);
     },
 
+    // ===== Diff 模式 =====
+    // 载荷由 Swift 端 MarkdownDiff.payloadJSON 生成：按新文档源码行号标出新增 / 修改块，
+    // 并给出被删除块的渲染结果与插入位置。修改块的逐词 diff 在这里基于 DOM 文本节点完成，
+    // 被删除的文字以不可选中的 span 插回原位，选词批注时不会混进选区。
+
+    _diffTagFor: {
+      paragraph: ['P'], heading: ['H1', 'H2', 'H3', 'H4', 'H5', 'H6'], listItem: ['LI'],
+      blockQuote: ['BLOCKQUOTE'], code: ['PRE'], table: ['TABLE'], thematicBreak: ['HR']
+    },
+
+    _diffFindBlock(line, kind) {
+      const content = document.getElementById('mr-content');
+      if (!content || !line) return null;
+      const els = content.querySelectorAll('[data-line="' + line + '"]');
+      const tags = MR._diffTagFor[kind];
+      for (const el of els) {
+        if (!tags || tags.includes(el.tagName)) return el;
+      }
+      return els[0] || null;
+    },
+
+    // 删除块的锚点：同一行号上优先取列表项或顶层块
+    _diffFindAnchor(line) {
+      const content = document.getElementById('mr-content');
+      if (!content || !line) return null;
+      const els = Array.from(content.querySelectorAll('[data-line="' + line + '"]'));
+      return els.find(el => el.tagName === 'LI' || el.parentElement === content) || els[0] || null;
+    },
+
+    _diffTopLevel(el) {
+      const content = document.getElementById('mr-content');
+      while (el && el.parentElement && el.parentElement !== content) el = el.parentElement;
+      return el;
+    },
+
+    // 旧版内容不参与行号体系（滚动同步、批注定位、段落批注都只认新文档）
+    _diffDetach(root) {
+      root.querySelectorAll('[data-line]').forEach(e => {
+        e.removeAttribute('data-line');
+        e.removeAttribute('data-line-end');
+      });
+      root.querySelectorAll('[id]').forEach(e => e.removeAttribute('id'));
+    },
+
+    applyDiff(diff) {
+      MR._diff = diff || null;
+      document.body.classList.toggle('mr-diff-mode', !!diff);
+      const content = document.getElementById('mr-content');
+      if (!content || !diff) return;
+      (diff.marks || []).forEach(m => {
+        const el = MR._diffFindBlock(m.line, m.kind);
+        if (!el) return;
+        if (m.status === 'added') {
+          el.classList.add('mr-diff-added');
+        } else {
+          el.classList.add('mr-diff-modified');
+          MR._diffModified(el, m);
+        }
+      });
+      (diff.removed || []).forEach(r => MR._diffInsertRemoved(r));
+    },
+
+    _diffInsertRemoved(r) {
+      const content = document.getElementById('mr-content');
+      const prev = MR._diffFindAnchor(r.afterLine);
+      const next = MR._diffFindAnchor(r.beforeLine);
+      const tmp = document.createElement('div');
+      tmp.innerHTML = r.html;
+      MR._diffDetach(tmp);
+
+      // 被删除的列表项：直接作为 <li> 插回相邻列表，保持缩进与圆点
+      if (r.kind === 'listItem') {
+        const li = tmp.querySelector('li');
+        if (li && next && next.tagName === 'LI') { li.classList.add('mr-diff-removed'); next.before(li); return; }
+        if (li && prev && prev.tagName === 'LI') { li.classList.add('mr-diff-removed'); prev.after(li); return; }
+      }
+      const wrap = document.createElement('div');
+      wrap.className = 'mr-diff-removed';
+      while (tmp.firstChild) wrap.appendChild(tmp.firstChild);
+      if (next) {
+        (next.tagName === 'LI' && r.kind !== 'listItem' ? MR._diffTopLevel(next) : next).before(wrap);
+      } else if (prev) {
+        (prev.tagName === 'LI' && r.kind !== 'listItem' ? MR._diffTopLevel(prev) : prev).after(wrap);
+      } else {
+        content.appendChild(wrap);
+      }
+    },
+
+    // 修改块：代码 / 分隔线等整体显示旧版；表格按行对齐；其余做逐词 diff
+    _diffModified(el, m) {
+      if (m.oldHTML == null) return;
+      if (m.kind === 'table') {
+        if (!MR._diffTable(el, m.oldHTML)) MR._diffShowOld(el, m.oldHTML);
+        return;
+      }
+      if (m.kind === 'code' || m.kind === 'thematicBreak' || m.kind === 'html' || m.kind === 'other') {
+        MR._diffShowOld(el, m.oldHTML);
+        return;
+      }
+      const tmp = document.createElement('div');
+      tmp.innerHTML = m.oldHTML;
+      const oldRoot = m.kind === 'listItem' ? (tmp.querySelector('li') || tmp) : tmp;
+      if (!MR._diffWords(el, MR._diffText(oldRoot), false)) MR._diffShowOld(el, m.oldHTML);
+    },
+
+    _diffShowOld(el, oldHTML) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = oldHTML;
+      MR._diffDetach(tmp);
+      if (el.tagName === 'LI') {
+        const li = tmp.querySelector('li');
+        if (li) { li.classList.add('mr-diff-removed'); el.before(li); return; }
+      }
+      const wrap = document.createElement('div');
+      wrap.className = 'mr-diff-removed';
+      while (tmp.firstChild) wrap.appendChild(tmp.firstChild);
+      el.before(wrap);
+    },
+
+    // 参与逐词 diff 的文本节点：跳过批注新增 / 评论（比较时已被还原掉）与已插入的删除片段
+    _diffTextNodes(root) {
+      const nodes = [];
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(n) {
+          const p = n.parentElement;
+          const skip = p && p.closest('.critic-add, .critic-comment, .mr-diff-del, .mr-copy-btn, script, style');
+          return (skip && root.contains(skip)) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+        }
+      });
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      return nodes;
+    },
+
+    _diffText(root) {
+      return MR._diffTextNodes(root).map(n => n.nodeValue).join('');
+    },
+
+    // 分词：中日韩逐字，拉丁文按词，空白与标点各自成词
+    _diffTokens(text) {
+      return text.match(/[぀-ヿ㐀-鿿豈-﫿가-힯]|[A-Za-z0-9_À-ɏ]+|\s+|[^\s]/g) || [];
+    },
+
+    // 通用 LCS：返回 {t:'e'|'d'|'i', i, j} 序列，同一段差异内删除在前、新增在后。超出规模返回 null。
+    _lcs(a, b, limit) {
+      const n = a.length, m = b.length;
+      let pre = 0;
+      while (pre < n && pre < m && a[pre] === b[pre]) pre++;
+      let suf = 0;
+      while (suf < n - pre && suf < m - pre && a[n - 1 - suf] === b[m - 1 - suf]) suf++;
+      const an = n - pre - suf, bm = m - pre - suf;
+      if (an * bm > (limit || 2000000)) return null;
+      const ops = [];
+      for (let k = 0; k < pre; k++) ops.push({ t: 'e', i: k, j: k });
+      const w = bm + 1;
+      const dp = new Int32Array((an + 1) * w);
+      for (let i = an - 1; i >= 0; i--) {
+        for (let j = bm - 1; j >= 0; j--) {
+          dp[i * w + j] = a[pre + i] === b[pre + j]
+            ? dp[(i + 1) * w + j + 1] + 1
+            : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1]);
+        }
+      }
+      let i = 0, j = 0, dels = [], ins = [];
+      while (i < an || j < bm) {
+        if (i < an && j < bm && a[pre + i] === b[pre + j]) {
+          ops.push(...dels, ...ins); dels = []; ins = [];
+          ops.push({ t: 'e', i: pre + i, j: pre + j }); i++; j++;
+        } else if (j >= bm || (i < an && dp[(i + 1) * w + j] >= dp[i * w + j + 1])) {
+          dels.push({ t: 'd', i: pre + i }); i++;
+        } else {
+          ins.push({ t: 'i', j: pre + j }); j++;
+        }
+      }
+      ops.push(...dels, ...ins);
+      for (let k = 0; k < suf; k++) ops.push({ t: 'e', i: n - suf + k, j: m - suf + k });
+      return ops;
+    },
+
+    // 在 el 的文本上叠加逐词 diff。force=false 时改动过碎（超过六成）返回 false，由调用方改为整块对照。
+    _diffWords(el, oldText, force) {
+      const newText = MR._diffText(el);
+      const a = MR._diffTokens(oldText), b = MR._diffTokens(newText);
+      const ops = MR._lcs(a, b, 1500000);
+      if (!ops) return false;
+
+      const edits = [];   // {type:'ins', s, e} | {type:'del', at, text}
+      let pos = 0, changed = 0;
+      for (const op of ops) {
+        if (op.t === 'e') { pos += b[op.j].length; continue; }
+        if (op.t === 'i') {
+          const len = b[op.j].length;
+          const last = edits[edits.length - 1];
+          if (last && last.type === 'ins' && last.e === pos) last.e += len;
+          else edits.push({ type: 'ins', s: pos, e: pos + len });
+          pos += len;
+        } else {
+          const tok = a[op.i];
+          const last = edits[edits.length - 1];
+          if (last && last.type === 'del' && last.at === pos) last.text += tok;
+          else edits.push({ type: 'del', at: pos, text: tok });
+        }
+      }
+      const real = edits.filter(e => e.type === 'del'
+        ? e.text.trim() !== ''
+        : newText.slice(e.s, e.e).trim() !== '');
+      real.forEach(e => { changed += e.type === 'del' ? e.text.length : (e.e - e.s); });
+      // 改动字符（删 + 增）超过两版总长的一半：逐词标记会碎成一片，不如整块对照
+      if (!force && changed > 0.5 * (oldText.length + newText.length)) return false;
+
+      // 从后往前应用，前面的偏移不受影响；同一位置先插删除片段再包新增
+      real.sort((x, y) => {
+        const px = x.type === 'del' ? x.at : x.s, py = y.type === 'del' ? y.at : y.s;
+        if (px !== py) return py - px;
+        return x.type === 'del' ? -1 : 1;
+      });
+      for (const e of real) {
+        if (e.type === 'del') MR._diffInsertDel(el, e.at, e.text);
+        else MR._diffWrapIns(el, e.s, e.e);
+      }
+      return true;
+    },
+
+    _diffInsertDel(root, at, text) {
+      const span = document.createElement('span');
+      span.className = 'mr-diff-del';
+      span.textContent = text;
+      const nodes = MR._diffTextNodes(root);
+      let start = 0;
+      for (const n of nodes) {
+        const len = n.nodeValue.length;
+        if (at < start + len || (at === start + len && n === nodes[nodes.length - 1])) {
+          const off = at - start;
+          if (off === 0) n.parentNode.insertBefore(span, n);
+          else if (off === len) n.parentNode.insertBefore(span, n.nextSibling);
+          else n.parentNode.insertBefore(span, n.splitText(off));
+          return;
+        }
+        start += len;
+      }
+      root.appendChild(span);
+    },
+
+    _diffWrapIns(root, s, e) {
+      const nodes = MR._diffTextNodes(root);
+      let start = 0;
+      for (const n of nodes) {
+        const len = n.nodeValue.length;
+        const ns = start, ne = start + len;
+        start = ne;
+        if (ne <= s || ns >= e) continue;
+        let target = n;
+        const from = Math.max(s, ns) - ns, to = Math.min(e, ne) - ns;
+        if (to < len) target.splitText(to);
+        if (from > 0) target = target.splitText(from);
+        const span = document.createElement('span');
+        span.className = 'mr-diff-ins';
+        target.parentNode.insertBefore(span, target);
+        span.appendChild(target);
+      }
+    },
+
+    // 表格：按行对齐（行文本做 LCS），相似的删除 / 新增行配成修改行做逐格 diff。列数变化返回 false。
+    _diffTable(el, oldHTML) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = oldHTML;
+      const oldTable = tmp.querySelector('table');
+      if (!oldTable) return false;
+      MR._diffDetach(tmp);
+      const cellsOf = tr => Array.from(tr.children);
+      const oldHead = oldTable.querySelector('thead tr'), newHead = el.querySelector('thead tr');
+      if (!oldHead || !newHead || cellsOf(oldHead).length !== cellsOf(newHead).length) return false;
+
+      const rowKey = tr => cellsOf(tr).map(c => MR._diffText(c).trim()).join('\t');
+      if (rowKey(oldHead) !== rowKey(newHead)) MR._diffRow(newHead, oldHead);
+
+      const oldRows = Array.from(oldTable.querySelectorAll('tbody tr'));
+      const newRows = Array.from(el.querySelectorAll('tbody tr'));
+      const ops = MR._lcs(oldRows.map(rowKey), newRows.map(rowKey), 1000000);
+      if (!ops) return false;
+      let tbody = el.querySelector('tbody');
+      if (!tbody) { tbody = document.createElement('tbody'); el.appendChild(tbody); }
+
+      let dels = [];
+      const flush = (beforeRow) => {
+        dels.forEach(tr => {
+          tr.classList.add('mr-diff-removed');
+          if (beforeRow) tbody.insertBefore(tr, beforeRow); else tbody.appendChild(tr);
+        });
+        dels = [];
+      };
+      // 两行至少半数单元格相同才算「同一行被修改」
+      const similarRows = (x, y) => {
+        const xc = cellsOf(x), yc = cellsOf(y);
+        if (xc.length !== yc.length) return false;
+        let same = 0;
+        xc.forEach((c, k) => { if (MR._diffText(c).trim() === MR._diffText(yc[k]).trim()) same++; });
+        return same * 2 >= xc.length;
+      };
+      for (const op of ops) {
+        if (op.t === 'd') { dels.push(oldRows[op.i]); continue; }
+        const row = newRows[op.j];
+        if (op.t === 'e') { flush(row); continue; }
+        // 新增行：与待定删除行中相似的一行配成修改行；它之前的删除行先落位
+        const k = dels.findIndex(d => similarRows(d, row));
+        if (k >= 0) {
+          const pair = dels[k];
+          const before = dels.slice(0, k);
+          dels = dels.slice(k + 1);
+          before.forEach(tr => { tr.classList.add('mr-diff-removed'); tbody.insertBefore(tr, row); });
+          MR._diffRow(row, pair);
+        } else {
+          row.classList.add('mr-diff-added');
+        }
+      }
+      flush(null);
+      return true;
+    },
+
+    _diffRow(newRow, oldRow) {
+      newRow.classList.add('mr-diff-modified');
+      const oc = Array.from(oldRow.children), nc = Array.from(newRow.children);
+      nc.forEach((cell, k) => {
+        const oldText = oc[k] ? MR._diffText(oc[k]) : '';
+        if (oldText.trim() !== MR._diffText(cell).trim()) MR._diffWords(cell, oldText, true);
+      });
+    },
+
+    // 跳到上一处 / 下一处改动（dir: 1 / -1），返回 [当前序号, 总数]
+    diffNavigate(dir) {
+      const sel = '.mr-diff-added, .mr-diff-modified, .mr-diff-removed';
+      const all = Array.from(document.querySelectorAll('#mr-content ' + sel))
+        .filter(el => !(el.parentElement && el.parentElement.closest(sel)));
+      if (!all.length) return [0, 0];
+      const anchor = 90;
+      let idx;
+      if (dir > 0) {
+        idx = all.findIndex(el => el.getBoundingClientRect().top > anchor + 2);
+        if (idx < 0) idx = 0;
+      } else {
+        idx = -1;
+        all.forEach((el, k) => { if (el.getBoundingClientRect().top < anchor - 2) idx = k; });
+        if (idx < 0) idx = all.length - 1;
+      }
+      const target = all[idx];
+      window.scrollBy({ top: target.getBoundingClientRect().top - anchor, behavior: 'smooth' });
+      target.classList.remove('mr-diff-flash');
+      void target.offsetWidth;
+      target.classList.add('mr-diff-flash');
+      return [idx + 1, all.length];
+    },
+
+    // ===== 段落批注：块间悬停「+」 =====
+
+    // 只含评论标记的段落 = 段落批注：展开显示评论内容，而不是只有一个 💬 角标
+    renderBlockComments() {
+      const content = document.getElementById('mr-content');
+      if (!content) return;
+      content.querySelectorAll(':scope > p').forEach(p => {
+        const nodes = Array.from(p.childNodes);
+        const bubbles = nodes.filter(n => n.nodeType === 1 && n.classList.contains('critic-comment'));
+        const onlyComments = bubbles.length > 0 && nodes.every(n =>
+          (n.nodeType === 3 && !n.textContent.trim()) ||
+          (n.nodeType === 1 && (n.classList.contains('critic-comment') || n.tagName === 'BR')));
+        if (!onlyComments) return;
+        p.classList.add('mr-block-comment');
+        bubbles.forEach(b => {
+          b.textContent = '';
+          const icon = document.createElement('span');
+          icon.className = 'mr-block-comment-icon';
+          icon.textContent = '\u{1F4AC}';
+          const text = document.createElement('span');
+          text.className = 'mr-block-comment-text';
+          text.textContent = b.dataset.comment || '';
+          b.appendChild(icon);
+          b.appendChild(text);
+        });
+      });
+    },
+
+    // 可挂段落批注的块：#mr-content 的直接子元素且带源码末行号
+    _blockCandidates() {
+      const content = document.getElementById('mr-content');
+      if (!content) return [];
+      return Array.from(content.children).filter(el => el.dataset && el.dataset.lineEnd);
+    },
+
+    _hideBlockAdd() {
+      const btn = document.getElementById('mr-block-add');
+      if (btn) btn.classList.remove('visible');
+      if (MR._blockAddTarget) MR._blockAddTarget.classList.remove('mr-block-target');
+      MR._blockAddTarget = null;
+    },
+
+    // 根据鼠标位置决定「+」挂在哪个块下方：鼠标所在（或其上方最近）的块，按钮放在它与下一块之间的空隙
+    _updateBlockAdd(x, y) {
+      const btn = document.getElementById('mr-block-add');
+      const content = document.getElementById('mr-content');
+      if (!btn || !content) return;
+      const bar = document.getElementById('mr-critic-toolbar');
+      const sel = window.getSelection();
+      if ((bar && bar.classList.contains('visible')) || (sel && !sel.isCollapsed)) { MR._hideBlockAdd(); return; }
+
+      const cRect = content.getBoundingClientRect();
+      if (x < cRect.left - 48 || x > cRect.right || y < cRect.top || y > cRect.bottom + 24) {
+        MR._hideBlockAdd();
+        return;
+      }
+      const blocks = MR._blockCandidates();
+      let idx = -1;
+      for (let i = 0; i < blocks.length; i++) {
+        if (blocks[i].getBoundingClientRect().top <= y) idx = i; else break;
+      }
+      if (idx < 0) { MR._hideBlockAdd(); return; }
+      const block = blocks[idx];
+      const rect = block.getBoundingClientRect();
+      const nextTop = idx + 1 < blocks.length ? blocks[idx + 1].getBoundingClientRect().top : rect.bottom + 16;
+      const gapMid = rect.bottom + Math.max(0, nextTop - rect.bottom) / 2;
+
+      if (MR._blockAddTarget !== block) {
+        if (MR._blockAddTarget) MR._blockAddTarget.classList.remove('mr-block-target');
+        MR._blockAddTarget = block;
+      }
+      const size = 18;
+      const left = Math.max(2, cRect.left - size - 6);
+      btn.style.left = (left + window.scrollX) + 'px';
+      btn.style.top = (gapMid - size / 2 + window.scrollY) + 'px';
+      btn.classList.add('visible');
+    },
+
+    _promptBlockComment(block, rect) {
+      const line = parseInt(block.dataset.lineEnd) || 0;
+      if (!line) return;
+      const bar = MR._ensureCriticToolbar();
+      // 复用选词评论的输入框：pending.text 为空、line 为块末行，提交时 op = blockComment
+      MR._criticPending = { text: '', line: line };
+      MR._criticRange = null;
+      MR._criticAnchorRect = rect;
+      const L = MR.criticLabels;
+      bar.classList.add('visible');
+      MR._promptCritic('blockComment', L.blockCommentHint || L.commentHint, true);
+      // 输入框放在「+」下方、与正文左对齐：不遮挡被批注的那一段
+      const content = document.getElementById('mr-content');
+      const cRect = content ? content.getBoundingClientRect() : rect;
+      const barRect = bar.getBoundingClientRect();
+      let top = rect.bottom + 6;
+      if (top + barRect.height > window.innerHeight - 4) top = Math.max(4, rect.top - barRect.height - 6);
+      bar.style.top = top + 'px';
+      bar.style.left = Math.max(4, Math.min(cRect.left, window.innerWidth - barRect.width - 4)) + 'px';
+    },
+
+    _initBlockCommentGutter() {
+      if (MR._isReadonly() || document.getElementById('mr-block-add')) return;
+      const btn = document.createElement('button');
+      btn.id = 'mr-block-add';
+      btn.type = 'button';
+      btn.innerHTML = '<svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 1.5v9M1.5 6h9"/></svg>';
+      document.body.appendChild(btn);
+
+      // 不抢焦点、不清选区，也不触发「点击空白关闭弹窗」
+      btn.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+      btn.addEventListener('mouseenter', () => {
+        btn.title = MR.criticLabels.blockComment || '';
+        if (MR._blockAddTarget) MR._blockAddTarget.classList.add('mr-block-target');
+      });
+      btn.addEventListener('mouseleave', () => {
+        if (MR._blockAddTarget) MR._blockAddTarget.classList.remove('mr-block-target');
+      });
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const block = MR._blockAddTarget;
+        const rect = btn.getBoundingClientRect();
+        MR._hideBlockAdd();
+        if (block) MR._promptBlockComment(block, rect);
+      });
+
+      let pending = null;
+      document.addEventListener('mousemove', (e) => {
+        if (e.target === btn) return;
+        const x = e.clientX, y = e.clientY;
+        if (pending) cancelAnimationFrame(pending);
+        pending = requestAnimationFrame(() => { pending = null; MR._updateBlockAdd(x, y); });
+      });
+      document.addEventListener('mouseleave', () => MR._hideBlockAdd());
+    },
+
     _initCriticSelection() {
       const readonly = this._isReadonly();
 
@@ -1013,6 +1519,11 @@
           MR._hideCriticToolbar();
           return;
         }
+        // 选区完全落在已有标注（删除 / 新增 / 高亮）内部：CriticMarkup 不能嵌套，不提供标注入口
+        const elOf = n => (n && n.nodeType === 3) ? n.parentElement : n;
+        const inA = elOf(range.startContainer) && elOf(range.startContainer).closest('.critic');
+        const inB = elOf(range.endContainer) && elOf(range.endContainer).closest('.critic');
+        if (inA && inA === inB) { MR._hideCriticToolbar(); return; }
         const rect = range.getBoundingClientRect();
         if (rect.width === 0 && rect.height === 0) { MR._hideCriticToolbar(); return; }
         MR._criticRange = range.cloneRange();
@@ -1027,12 +1538,15 @@
     },
 
     init() {
+      MR.applyDiff(window.MR_DIFF || null);
       MR.renderMermaid();
       MR.renderPlantUML();
       MR.renderKaTeX();
       MR.renderAdmonitions();
+      MR.renderBlockComments();
       MR.addCopyButtons();
       MR._initCriticSelection();
+      MR._initBlockCommentGutter();
       if (typeof Prism !== 'undefined') {
         Prism.highlightAll();
       }

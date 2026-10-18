@@ -166,6 +166,20 @@ public enum CriticMarkup {
         return result
     }
 
+    /// `range` 是否完全落在某个已有 CriticMarkup 标注（含定界符）之内。
+    static func isInsideAnnotation(_ range: Range<String.Index>, in source: String) -> Bool {
+        let full = NSRange(source.startIndex..., in: source)
+        for entry in inlineSpanPatterns.prefix(5) {
+            guard let regex = try? NSRegularExpression(pattern: entry.pattern) else { continue }
+            for m in regex.matches(in: source, range: full) {
+                guard let r = Range(m.range, in: source) else { continue }
+                if r.lowerBound <= range.lowerBound && range.upperBound <= r.upperBound { return true }
+                if r.lowerBound >= range.upperBound { break }
+            }
+        }
+        return false
+    }
+
     // MARK: - 应用标注
 
     /// 实际写入的一条标注（字段与 `parseAnnotations` 的解析结果对齐，供会话记录配对）。
@@ -203,6 +217,8 @@ public enum CriticMarkup {
     ///    评论 / 替换 / 插入的语义落在最后一个片段上，任一片段定位失败则整体失败。
     public static func applyDetailed(_ op: Operation, to source: String, selectedText: String, nearLine: Int) -> ApplyResult? {
         if let raw = locateRange(in: source, selectedText: selectedText, nearLine: nearLine) {
+            // CriticMarkup 不支持嵌套：选区落在已有标注内部时拒绝写入（否则 `{--{--x--}--}` 渲染错乱）
+            if isInsideAnnotation(raw, in: source) { return nil }
             let range = formatSafeRange(raw, in: source)
             if !containsBlankLine(source[range]) {
                 return wrapSingle(op, source: source, range: range)
@@ -319,6 +335,29 @@ public enum CriticMarkup {
         }
     }
 
+    // MARK: - 段落批注
+
+    /// 在第 `afterLine` 行（1 基，通常是某个块的末行）之后插入一条独立的段落批注 `{>>comment<<}`。
+    /// 批注自成一段（前后各留空行），不针对某句话而是针对其上方的整块内容。
+    /// `afterLine` 落在块尾的空行上时回退到最近的非空行；越界或评论为空返回 nil。
+    public static func insertBlockComment(in source: String, afterLine: Int, comment: String) -> ApplyResult? {
+        let text = collapseBlankLines(comment)
+        guard !text.isEmpty else { return nil }
+        var lines = source.components(separatedBy: "\n")
+        guard afterLine >= 1, afterLine <= lines.count else { return nil }
+        let isBlank: (String) -> Bool = { $0.trimmingCharacters(in: .whitespaces).isEmpty }
+        var anchor = afterLine
+        while anchor > 1, isBlank(lines[anchor - 1]) { anchor -= 1 }
+
+        var inserted = ["", "{>>\(text)<<}"]
+        if anchor < lines.count, !isBlank(lines[anchor]) { inserted.append("") }
+        lines.insert(contentsOf: inserted, at: anchor)
+        return ApplyResult(
+            source: lines.joined(separator: "\n"),
+            annotations: [AppliedAnnotation(kind: .comment, text: text, payload: nil)]
+        )
+    }
+
     // MARK: - 编辑 / 删除评论
 
     /// 编辑已有评论：定位最接近 `nearLine` 的 `{>>oldComment<<}` 并替换其内容。
@@ -356,7 +395,13 @@ public enum CriticMarkup {
             let inner = String(highlight.dropFirst(3).dropLast(3))   // 去掉 {== 与 ==}
             result.replaceSubrange(hl.lowerBound..<range.upperBound, with: inner)
         } else {
-            result.replaceSubrange(range, with: "")
+            // 段落批注（独占一段）：连同前面的空行一起删掉，不留多余空段
+            var removal = range
+            let after = result[range.upperBound...]
+            if before.hasSuffix("\n\n"), after.isEmpty || after.hasPrefix("\n") {
+                removal = result.index(range.lowerBound, offsetBy: -2)..<range.upperBound
+            }
+            result.replaceSubrange(removal, with: "")
         }
         return result
     }
@@ -519,7 +564,10 @@ public enum CriticMarkup {
         var groups: [(paragraph: Range<String.Index>, anns: [Annotation])] = []
         for ann in annotations.sorted(by: { $0.range.lowerBound < $1.range.lowerBound }) {
             let para = paragraphRange(around: ann.range, in: source)
-            if let last = groups.last, last.paragraph == para {
+            // 段落批注的范围并入了上一段，可能与上一段自身的组重叠：合并为一组，避免重复导出
+            if let last = groups.last, last.paragraph.overlaps(para) || last.paragraph == para {
+                let merged = min(last.paragraph.lowerBound, para.lowerBound)..<max(last.paragraph.upperBound, para.upperBound)
+                groups[groups.count - 1].paragraph = merged
                 groups[groups.count - 1].anns.append(ann)
             } else {
                 groups.append((para, [ann]))
@@ -572,6 +620,7 @@ public enum CriticMarkup {
     }
 
     /// 标注所在段落范围（以空行为界）。
+    /// 段落批注（整段只有 `{>>...<<}`）针对的是上一段，范围向前并入上一段，导出时才带上下文。
     private static func paragraphRange(around range: Range<String.Index>, in source: String) -> Range<String.Index> {
         var start = source.startIndex
         if let r = source.range(of: "\n\n", options: .backwards, range: source.startIndex..<range.lowerBound) {
@@ -581,7 +630,24 @@ public enum CriticMarkup {
         if let r = source.range(of: "\n\n", range: range.upperBound..<source.endIndex) {
             end = r.lowerBound
         }
+        if isStandaloneComment(source[start..<end]), start > source.startIndex {
+            var prevEnd = source.index(before: start)
+            while prevEnd > source.startIndex, source[source.index(before: prevEnd)].isNewline {
+                prevEnd = source.index(before: prevEnd)
+            }
+            var prevStart = source.startIndex
+            if let r = source.range(of: "\n\n", options: .backwards, range: source.startIndex..<prevEnd) {
+                prevStart = r.upperBound
+            }
+            start = prevStart
+        }
         return start..<end
+    }
+
+    /// 文本是否只由评论标记组成（段落批注）。
+    static func isStandaloneComment(_ text: Substring) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.range(of: #"^(\{>>(?:(?!<<\})[\s\S])*<<\}\s*)+$"#, options: .regularExpression) != nil
     }
 
     /// `index` 之前最近的 ATX 标题行（如 "## 章节"）。

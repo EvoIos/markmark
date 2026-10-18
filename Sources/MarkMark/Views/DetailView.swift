@@ -364,6 +364,15 @@ struct DetailView: View {
                         }
                     }
 
+                    // 对比改动：基线来源（git HEAD / 外部修改前的版本 / 任意文件）
+                    TitleBarIconMenu(
+                        systemName: "plusminus.circle",
+                        helpText: L10n.tr(.diffMenu, language: language),
+                        foregroundColor: documentViewModel.activeDiffBaseline != nil ? themeColors.accent : themeColors.fgMuted
+                    ) {
+                        diffMenuItems
+                    }
+
                     // 标注列表面板切换
                     TitleBarIconButton(
                         systemName: "highlighter",
@@ -462,6 +471,119 @@ struct DetailView: View {
         }
     }
 
+    // MARK: - Diff 模式
+
+    @ViewBuilder
+    private var diffMenuItems: some View {
+        if documentViewModel.isGitTracked {
+            Button {
+                documentViewModel.startGitDiff()
+            } label: {
+                Label(L10n.tr(.diffWithGitHead, language: language), systemImage: "arrow.triangle.branch")
+            }
+        }
+        if documentViewModel.hasSessionBaseline {
+            Button {
+                documentViewModel.startSessionDiff()
+            } label: {
+                Label(L10n.tr(.diffWithSession, language: language), systemImage: "clock.arrow.circlepath")
+            }
+        }
+        Button {
+            chooseDiffBaselineFile()
+        } label: {
+            Label(L10n.tr(.diffWithFile, language: language), systemImage: "doc.badge.plus")
+        }
+        if documentViewModel.activeDiffBaseline != nil {
+            Divider()
+            Button {
+                documentViewModel.markDiffReviewed()
+            } label: {
+                Label(L10n.tr(.diffMarkReviewed, language: language), systemImage: "checkmark")
+            }
+            Button {
+                documentViewModel.exitDiff()
+            } label: {
+                Label(L10n.tr(.diffExit, language: language), systemImage: "xmark")
+            }
+        }
+    }
+
+    private func chooseDiffBaselineFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = documentViewModel.currentFileURL?.deletingLastPathComponent()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await documentViewModel.startFileDiff(with: url) }
+    }
+
+    private func diffBaselineTitle(_ baseline: DocumentViewModel.DiffBaseline) -> String {
+        switch baseline.source {
+        case .gitHEAD:
+            return L10n.tr(.diffBaselineGit, language: language)
+        case .file(let name):
+            return L10n.tr(.diffBaselineFile, language: language, args: ["name": name])
+        case .session(let date):
+            let time = date.formatted(date: .omitted, time: .shortened)
+            return L10n.tr(.diffBaselineSession, language: language, args: ["time": time])
+        }
+    }
+
+    private func navigateDiff(_ direction: Int) {
+        webViewHandle.webView?.evaluateJavaScript("MR.diffNavigate && MR.diffNavigate(\(direction))", completionHandler: nil)
+    }
+
+    /// 对比模式状态条：基线来源、改动统计、上一处 / 下一处、标记已读、退出
+    @ViewBuilder
+    private func diffBanner(_ baseline: DocumentViewModel.DiffBaseline) -> some View {
+        let stats = documentViewModel.diffStats ?? MarkdownDiff.Stats()
+        HStack(spacing: 10) {
+            Image(systemName: "plusminus.circle")
+                .foregroundStyle(themeColors.accent)
+            Text(diffBaselineTitle(baseline))
+                .foregroundStyle(themeColors.ink)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if stats.total == 0 {
+                Text(L10n.tr(.diffNoChanges, language: language))
+                    .foregroundStyle(themeColors.fgMuted)
+            } else {
+                HStack(spacing: 6) {
+                    if stats.added > 0 { Text("+\(stats.added)").foregroundStyle(themeColors.success) }
+                    if stats.modified > 0 { Text("~\(stats.modified)").foregroundStyle(Color.orange) }
+                    if stats.deleted > 0 { Text("−\(stats.deleted)").foregroundStyle(themeColors.danger) }
+                }
+                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+            }
+            Spacer(minLength: 8)
+            if stats.total > 0 {
+                Button { navigateDiff(-1) } label: { Image(systemName: "chevron.up") }
+                    .help(L10n.tr(.diffPrev, language: language))
+                Button { navigateDiff(1) } label: { Image(systemName: "chevron.down") }
+                    .help(L10n.tr(.diffNext, language: language))
+            }
+            Button(L10n.tr(.diffMarkReviewed, language: language)) {
+                documentViewModel.markDiffReviewed()
+            }
+            Button {
+                documentViewModel.exitDiff()
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .help(L10n.tr(.diffExit, language: language))
+        }
+        .buttonStyle(.borderless)
+        .font(.system(size: 12))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(themeColors.bgSubtle)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(themeColors.border).frame(height: 1)
+        }
+    }
+
     // MARK: - 大纲侧边栏
 
     /// 大纲按钮颜色：激活时强调色，有文档时次要色，无文档时弱化色
@@ -496,6 +618,8 @@ struct DetailView: View {
             "notFound": L10n.tr(.criticNotFound, language: language),
             "commentHint": L10n.tr(.criticCommentHint, language: language),
             "replaceHint": L10n.tr(.criticReplaceHint, language: language),
+            "blockComment": L10n.tr(.criticBlockComment, language: language),
+            "blockCommentHint": L10n.tr(.criticBlockCommentHint, language: language),
         ]
     }
 
@@ -832,12 +956,18 @@ struct DetailView: View {
                 .id(documentViewModel.currentFileURL)
             } else {
                 // Markdown：仅渲染视图。文本兜底不进入此分支。
+                // 对比模式时顶部显示状态条（放在同一个 VStack 里，出现 / 消失不会重建 WebView）
+                VStack(spacing: 0) {
+                if let baseline = documentViewModel.activeDiffBaseline {
+                    diffBanner(baseline)
+                }
                 WebViewMarkdownView(
                     content: documentViewModel.content,
                     fileURL: documentViewModel.currentFileURL,
                     contentPadding: settings.contentPaddingPoints,
                     maxContentWidthFollowsWindow: settings.maxContentWidthFollowsWindow,
                     mathEnabled: settings.enableMathRendering,
+                    diffPayload: documentViewModel.diffPayload,
                     scrollToLine: documentViewModel.scrollToLineRequest,
                     themeCSS: themeColors.cssCustomProperties + themeColors.codeHighlightCSS,
                     isDark: settings.resolvedThemeType == .dark,
@@ -865,6 +995,7 @@ struct DetailView: View {
                             documentViewModel.clearScrollRequest()
                         }
                     }
+                }
                 }
             }
         }

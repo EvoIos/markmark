@@ -23,12 +23,16 @@ final class DocumentViewModel {
             if currentFileURL != nil && !isLoading {
                 markDirtyIfNeeded()
             }
+            if content != oldValue { refreshDiff() }
         }
     }
 
     /// 当前文件 URL
     var currentFileURL: URL? {
-        didSet { syncHasDocument() }
+        didSet {
+            syncHasDocument()
+            if currentFileURL != oldValue { refreshDiff() }
+        }
     }
 
     /// 当前文件名
@@ -151,6 +155,8 @@ final class DocumentViewModel {
 
     /// 当前打开文件的文件系统监控器
     private let fileWatcher = FileSystemWatcher(debounceInterval: 0.5)
+    /// 监听 `mdr diff` 请求目录
+    private let diffRequestWatcher = FileSystemWatcher(debounceInterval: 0.2)
 
     // MARK: - 依赖
 
@@ -241,6 +247,13 @@ final class DocumentViewModel {
 
         // 启动文件监控（排除临时文件）
         startFileWatcher(for: url)
+
+        if isMarkdownDocument {
+            claimDiffRequest()
+            startDiffRequestWatcher()
+            refreshGitBaseline(for: url)
+        }
+        refreshDiff()
     }
 
     private func showUnsupportedFile(_ url: URL) {
@@ -316,6 +329,17 @@ final class DocumentViewModel {
                 registerCriticUndo()
                 content = updated
                 removeSessionRecord(comment: action.text)
+                return true
+            }
+            return false
+        case "blockComment":
+            // 段落批注：action.line 为目标块的末行，批注作为独立段落插在其后
+            if let result = CriticMarkup.insertBlockComment(
+                in: content, afterLine: action.line, comment: action.payload ?? ""
+            ) {
+                registerCriticUndo()
+                content = result.source
+                appendSessionRecords(result.annotations)
                 return true
             }
             return false
@@ -415,13 +439,19 @@ final class DocumentViewModel {
         if let idx = records.firstIndex(where: { $0.kind == .comment && $0.payload == oldComment }) {
             records[idx].payload = newComment
             sessionAnnotations[url] = records
+        } else if let idx = records.firstIndex(where: { $0.kind == .comment && $0.payload == nil && $0.text == oldComment }) {
+            // 段落批注（纯评论）：评论内容记在 text 上
+            records[idx].text = newComment
+            sessionAnnotations[url] = records
         }
     }
 
     /// 评论被删除后同步会话记录
     private func removeSessionRecord(comment: String) {
         guard let url = currentFileURL, var records = sessionAnnotations[url] else { return }
-        if let idx = records.firstIndex(where: { $0.kind == .comment && $0.payload == comment }) {
+        if let idx = records.firstIndex(where: {
+            $0.kind == .comment && ($0.payload == comment || ($0.payload == nil && $0.text == comment))
+        }) {
             records.remove(at: idx)
             sessionAnnotations[url] = records
         }
@@ -668,6 +698,146 @@ final class DocumentViewModel {
         isFileModifiedExternally = false
     }
 
+    // MARK: - Diff 模式
+
+    /// 对比基线：修改前的版本及其来源。
+    struct DiffBaseline: Equatable {
+        enum Source: Equatable {
+            /// `mdr diff` 传入的旧文件（显示名）
+            case file(String)
+            /// git HEAD 中的版本
+            case gitHEAD
+            /// 本次会话中文件首次被外部修改前的版本
+            case session(Date)
+        }
+        let text: String
+        let source: Source
+    }
+
+    /// 各文件当前生效的对比基线（存在即处于对比模式）
+    private(set) var diffBaselines: [URL: DiffBaseline] = [:]
+    /// 会话基线：文件首次被外部修改前的内容，「标记已读」后清除
+    private var sessionBaselines: [URL: DiffBaseline] = [:]
+    /// 用户主动退出了对比的文件：此后外部修改不再自动进入对比
+    private var diffDismissed: Set<URL> = []
+    /// 文件是否被 git 跟踪（决定是否提供「对比 HEAD」）
+    private(set) var gitTrackedFiles: Set<URL> = []
+
+    /// 交给渲染层的 diff 载荷（JSON）与统计；不在对比模式时为 nil
+    private(set) var diffPayload: String?
+    private(set) var diffStats: MarkdownDiff.Stats?
+
+    var activeDiffBaseline: DiffBaseline? {
+        guard isMarkdownDocument, let url = currentFileURL else { return nil }
+        return diffBaselines[url]
+    }
+
+    var hasSessionBaseline: Bool {
+        guard let url = currentFileURL else { return false }
+        return sessionBaselines[url] != nil
+    }
+
+    var isGitTracked: Bool {
+        guard let url = currentFileURL else { return false }
+        return gitTrackedFiles.contains(url)
+    }
+
+    func startDiff(_ baseline: DiffBaseline) {
+        guard let url = currentFileURL, isMarkdownDocument else { return }
+        diffBaselines[url] = baseline
+        diffDismissed.remove(url)
+        refreshDiff()
+    }
+
+    /// 以会话基线（打开期间首次被外部修改前的版本）进入对比
+    func startSessionDiff() {
+        guard let url = currentFileURL, let baseline = sessionBaselines[url] else { return }
+        startDiff(baseline)
+    }
+
+    /// 以 git HEAD 为基线进入对比（现取，避免使用过期的 HEAD）
+    func startGitDiff() {
+        guard let url = currentFileURL else { return }
+        Task {
+            guard let text = await GitService.headText(of: url), currentFileURL == url else { return }
+            startDiff(DiffBaseline(text: text, source: .gitHEAD))
+        }
+    }
+
+    /// 以任意文件为基线进入对比（菜单「选择文件对比…」）
+    func startFileDiff(with baselineURL: URL) async {
+        guard let url = currentFileURL,
+              let text = try? await fileService.readFile(at: baselineURL),
+              currentFileURL == url else { return }
+        startDiff(DiffBaseline(text: text, source: .file(baselineURL.lastPathComponent)))
+    }
+
+    /// 退出对比（保留会话基线，可再次进入；外部修改不再自动进入）
+    func exitDiff() {
+        guard let url = currentFileURL else { return }
+        diffBaselines.removeValue(forKey: url)
+        diffDismissed.insert(url)
+        refreshDiff()
+    }
+
+    /// 标记已读：退出对比并丢弃会话基线；之后的外部修改从此刻起重新计算并自动进入对比
+    func markDiffReviewed() {
+        guard let url = currentFileURL else { return }
+        diffBaselines.removeValue(forKey: url)
+        sessionBaselines.removeValue(forKey: url)
+        diffDismissed.remove(url)
+        refreshDiff()
+    }
+
+    private func recordSessionBaseline(_ previous: String, for url: URL) {
+        if sessionBaselines[url] == nil {
+            sessionBaselines[url] = DiffBaseline(text: previous, source: .session(Date()))
+        }
+        if diffBaselines[url] == nil, !diffDismissed.contains(url) {
+            diffBaselines[url] = sessionBaselines[url]
+        }
+    }
+
+    /// 重新计算 diff 载荷（内容、文件或基线变化时调用）
+    private func refreshDiff() {
+        guard let baseline = activeDiffBaseline, let url = currentFileURL else {
+            if diffPayload != nil { diffPayload = nil }
+            if diffStats != nil { diffStats = nil }
+            return
+        }
+        let result = MarkdownHTMLService.diffPayload(
+            baseline: baseline.text,
+            content: content,
+            baseURL: url.deletingLastPathComponent(),
+            mathEnabled: settings.enableMathRendering
+        )
+        diffPayload = result.json
+        diffStats = result.stats
+    }
+
+    /// 认领 `mdr diff` 投递给当前文件的对比请求
+    private func claimDiffRequest() {
+        guard let url = currentFileURL, isMarkdownDocument,
+              let request = DiffRequestService.consumeRequest(for: url) else { return }
+        startDiff(DiffBaseline(text: request.baselineText, source: .file(request.baselineName)))
+    }
+
+    private func startDiffRequestWatcher() {
+        DiffRequestService.ensureDirectory()
+        diffRequestWatcher.startWatching(url: DiffRequestService.directory) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.claimDiffRequest()
+            }
+        }
+    }
+
+    private func refreshGitBaseline(for url: URL) {
+        Task {
+            let tracked = await GitService.headText(of: url) != nil
+            if tracked { gitTrackedFiles.insert(url) } else { gitTrackedFiles.remove(url) }
+        }
+    }
+
     // MARK: - 文件监控与外部变更检测
 
     /// 启动对指定文件的外部变更监控
@@ -707,6 +877,10 @@ final class DocumentViewModel {
             if let snapshot = diskContentSnapshot[url], diskContent != snapshot {
                 if !isDirty {
                     // 用户未修改过，自动静默刷新
+                    // 刷新前把旧内容留作会话基线（Agent 边改边看的场景），并自动进入对比
+                    if loaded.kind == .markdown {
+                        recordSessionBaseline(snapshot, for: url)
+                    }
                     // 先更新快照，再设置 content，防止 didSet 中 markDirtyIfNeeded() 误判
                     documentKind = loaded.kind
                     diskContentSnapshot[url] = diskContent

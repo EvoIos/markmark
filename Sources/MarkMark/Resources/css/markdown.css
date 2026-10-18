@@ -162,21 +162,41 @@ ul, ol {
 li { margin-bottom: 4px; }
 li > ul, li > ol { margin-top: 4px; margin-bottom: 0; }
 
+/* 表头吸顶：长表格滚动时 thead 固定在视口顶部。
+   border-collapse: collapse 下 WebKit 的 sticky 单元格边框不随单元格移动，
+   因此改用 separate + 0 间距，边框只画右/下（首列补左、表头补上）模拟合并效果。
+   不给表格套 overflow 容器：那会让纵向 sticky 失效，宽表格交给页面自身横向滚动。 */
 table {
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   width: 100%;
   margin-bottom: 16px;
-  overflow: auto;
 }
 
 table th, table td {
   padding: 6px 13px;
-  border: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+table th:first-child, table td:first-child {
+  border-left: 1px solid var(--border);
+}
+
+table thead th {
+  border-top: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 table th {
   font-weight: 600;
   background: var(--bg-elevated);
+}
+
+@media print {
+  table thead th { position: static; }
 }
 
 table tr {
@@ -542,3 +562,132 @@ textarea.critic-field { min-height: 60px; }
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+
+/* ===== 段落批注 ===== */
+/* 块间悬停「+」：点击为其上方的块添加独立批注 */
+#mr-block-add {
+  position: absolute;
+  z-index: 50;
+  width: 18px;
+  height: 18px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+#mr-block-add svg { display: block; }
+#mr-block-add.visible { display: flex; }
+#mr-block-add:hover,
+#mr-block-add.hover {
+  background: var(--accent);
+  color: #fff;
+}
+.markdown-preview .mr-block-target {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 6%, transparent);
+  border-radius: 2px;
+}
+
+/* 独立成段的批注：展开显示评论内容 */
+p.mr-block-comment .critic-comment {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  vertical-align: baseline;
+  font-size: 0.9em;
+  margin: 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+p.mr-block-comment .critic-comment + .critic-comment { margin-top: 6px; }
+.mr-block-comment-icon { flex: none; }
+
+@media print {
+  #mr-block-add { display: none !important; }
+}
+
+/* ===== Diff 模式 ===== */
+/* 块级：左侧色条（新增绿 / 修改橙 / 删除红）+ 淡底色。行内：新增浅绿底，删除红色删除线且不可选中 */
+#mr-content .mr-diff-added,
+#mr-content .mr-diff-modified,
+#mr-content .mr-diff-removed {
+  position: relative;
+}
+#mr-content .mr-diff-added::before,
+#mr-content .mr-diff-modified::before,
+#mr-content .mr-diff-removed::before {
+  content: '';
+  position: absolute;
+  left: -14px;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  border-radius: 2px;
+}
+#mr-content li.mr-diff-added::before,
+#mr-content li.mr-diff-modified::before,
+#mr-content li.mr-diff-removed::before {
+  left: calc(-2em - 6px);
+}
+#mr-content .mr-diff-added::before { background: var(--success); }
+#mr-content .mr-diff-modified::before { background: var(--warning, #e0a030); }
+#mr-content .mr-diff-removed::before { background: var(--danger); }
+
+#mr-content .mr-diff-added {
+  background: color-mix(in srgb, var(--success) 7%, transparent);
+}
+#mr-content .mr-diff-removed {
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+  color: var(--fg-muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--danger) 60%, transparent);
+  -webkit-user-select: none;
+  user-select: none;
+}
+div.mr-diff-removed { margin-bottom: 16px; }
+div.mr-diff-removed > :last-child { margin-bottom: 0; }
+
+/* 自带 overflow 的块（代码、公式、图表）会裁掉伪元素色条，改用左边框 */
+#mr-content pre.mr-diff-added::before, #mr-content pre.mr-diff-modified::before,
+#mr-content .katex-display.mr-diff-added::before, #mr-content .katex-display.mr-diff-modified::before,
+#mr-content .mermaid-container.mr-diff-added::before, #mr-content .mermaid-container.mr-diff-modified::before { content: none; }
+#mr-content pre.mr-diff-added, #mr-content .katex-display.mr-diff-added,
+#mr-content .mermaid-container.mr-diff-added { border-left: 3px solid var(--success); }
+#mr-content pre.mr-diff-modified, #mr-content .katex-display.mr-diff-modified,
+#mr-content .mermaid-container.mr-diff-modified { border-left: 3px solid var(--warning, #e0a030); }
+
+/* 表格行：tr 不能挂伪元素色条，改为整行底色 */
+#mr-content tr.mr-diff-added::before,
+#mr-content tr.mr-diff-modified::before,
+#mr-content tr.mr-diff-removed::before { content: none; }
+#mr-content tr.mr-diff-added > td { background: color-mix(in srgb, var(--success) 12%, var(--surface)); }
+#mr-content tr.mr-diff-removed > td { background: color-mix(in srgb, var(--danger) 10%, var(--surface)); }
+#mr-content tr.mr-diff-modified > td { background: color-mix(in srgb, var(--warning, #e0a030) 8%, var(--surface)); }
+
+.mr-diff-ins {
+  background: color-mix(in srgb, var(--success) 26%, transparent);
+  border-radius: 2px;
+}
+.mr-diff-del {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: color-mix(in srgb, var(--danger) 75%, var(--ink));
+  text-decoration: line-through;
+  border-radius: 2px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+@keyframes mr-diff-flash {
+  from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent); }
+  to { box-shadow: 0 0 0 3px transparent; }
+}
+#mr-content .mr-diff-flash { animation: mr-diff-flash 1.2s ease-out; }

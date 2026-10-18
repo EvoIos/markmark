@@ -165,6 +165,11 @@ struct GeneralSettingsView: View {
                     if isTogglingCommandLine {
                         ProgressView()
                             .controlSize(.small)
+                    } else if settings.enableCommandLine && commandLineService.isOutdated {
+                        // 旧版 mdr 不支持 `mdr diff`：重新安装覆盖
+                        Button(L10n.tr(.settingsGeneralCommandLineUpdate, language: language)) {
+                            toggleCommandLine(true)
+                        }
                     }
                 }
                 .alert(
