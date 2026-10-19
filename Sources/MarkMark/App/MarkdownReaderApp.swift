@@ -87,8 +87,10 @@ struct MarkdownReaderApp: App {
                         .environment(\.language, language)
                 }
                 // 启动时自动检查更新（延迟 2 秒，避免影响启动速度）
+                // 功能关闭时不检查（见 UpdateService.isEnabled），但 WebView 预热照常
                 .task {
                     WebViewWarmer.warmUp()
+                    guard UpdateService.isEnabled else { return }
                     try? await Task.sleep(for: .seconds(2))
                     updateViewModel.checkForUpdatesAutomatically()
                 }
@@ -126,9 +128,11 @@ struct MarkdownReaderApp: App {
                 }
                 .keyboardShortcut(",", modifiers: .command)
 
-                // 检查更新
-                Button(L10n.tr(.checkForUpdates, language: language)) {
-                    NotificationCenter.default.post(name: .checkForUpdates, object: nil)
+                // 检查更新（功能关闭期间不显示入口，见 UpdateService.isEnabled）
+                if UpdateService.isEnabled {
+                    Button(L10n.tr(.checkForUpdates, language: language)) {
+                        NotificationCenter.default.post(name: .checkForUpdates, object: nil)
+                    }
                 }
             }
 

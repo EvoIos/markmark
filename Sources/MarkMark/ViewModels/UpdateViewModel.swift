@@ -95,6 +95,8 @@ final class UpdateViewModel {
     }
 
     private func performCheck(isManual: Bool) {
+        // 功能已关闭（fork 期间不连上游 Releases，见 UpdateService.isEnabled）
+        guard UpdateService.isEnabled else { return }
         guard checkState.canCheck else { return }
 
         checkState = .checking

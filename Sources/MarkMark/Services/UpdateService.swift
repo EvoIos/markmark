@@ -15,9 +15,22 @@ struct GitHubRelease: Sendable {
 /// 自动更新服务：检查 GitHub Releases API，解析最新版本信息
 final class UpdateService: Sendable {
 
+    // MARK: - 功能开关
+
+    /// 是否启用「检查更新」。
+    ///
+    /// 本仓库是 fork（`EvoIos/markmark`），而下面的 `owner`/`repo` 仍指向上游：自动检查会把上游
+    /// Release 当成「新版本」，一路走到下载并替换 .app，等于用上游构建覆盖 fork 自己的包。
+    /// 所以在改成自己的发布地址之前，先整个关掉：`isEnabled == false` 时菜单不显示入口、
+    /// 启动不自动检查、也不发起任何网络请求。
+    ///
+    /// 日后恢复：把 `owner`/`repo` 改成承接发布的仓库（例如 `EvoIos` / `markmark`），
+    /// 确认它真的产出 Release 资产后，再把这里改回 `true`。
+    static let isEnabled = false
+
     // MARK: - 常量
 
-    /// GitHub 仓库所有者
+    /// GitHub 仓库所有者（目前是上游；fork 后需改成自己的仓库，见 `isEnabled`）
     private static let owner = "easychen"
 
     /// GitHub 仓库名称

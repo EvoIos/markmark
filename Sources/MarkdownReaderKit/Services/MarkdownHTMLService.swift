@@ -420,6 +420,50 @@ public enum MarkdownHTMLService {
         result.replaceSubrange(range, with: String(repeating: "\n", count: newlines))
         return result
     }
+
+    // MARK: - 代码围栏语言（Prism）
+
+    /// 围栏语言标签 → Prism 语言键，用于补上文档里常见但 Prism 不认的写法。
+    ///
+    /// Prism 只为一部分语言注册了别名（`objc`→`objectivec`、`cs`→`csharp`、`md`→`markdown`…），
+    /// `objective-c`、`c++`、`patch`、`proto`、`asm` 等写法不在其中：不归一化时
+    /// autoloader 会去取并不存在的 `prism-objective-c.min.js`，代码块最终退化成无高亮的纯文本。
+    ///
+    /// 表里的值必须是随包提供的语言（`Sources/MarkMark/Resources/js/prism-*.min.js`）。
+    static let prismLanguageAliases: [String: String] = [
+        "objective-c": "objectivec",
+        "obj-c": "objectivec",
+        "objective_c": "objectivec",
+        "c++": "cpp",
+        "cplusplus": "cpp",
+        "c#": "csharp",
+        "f#": "fsharp",
+        "patch": "diff",
+        "proto": "protobuf",
+        "asm": "nasm",
+        "golang": "go",
+        "console": "shell-session",
+        "zsh": "bash",
+        "make": "makefile",
+        // SQL 方言没有各自的组件，退回通用 SQL 语法总好过整块灰色
+        "mysql": "sql",
+        "postgres": "sql",
+        "postgresql": "sql",
+        "pgsql": "sql",
+        "sqlite": "sql",
+    ]
+
+    /// 归一化围栏语言标签：小写 → 取第一个 token（丢掉 ```swift title=… 这类附加信息）
+    /// → 去掉 Pandoc `{.swift}` 的花括号与点号 → 查别名表。
+    static func prismLanguage(forFenceLabel raw: String?) -> String {
+        guard let raw else { return "" }
+        var label = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let first = label.split(whereSeparator: { $0.isWhitespace }).first {
+            label = String(first)
+        }
+        label = label.trimmingCharacters(in: CharacterSet(charactersIn: "{}.!"))
+        return prismLanguageAliases[label] ?? label
+    }
 }
 
 private struct CustomHTMLFormatter: MarkupWalker {
@@ -529,7 +573,7 @@ private struct CustomHTMLFormatter: MarkupWalker {
     }
 
     mutating func visitCodeBlock(_ codeBlock: CodeBlock) {
-        let language = codeBlock.language ?? ""
+        let language = MarkdownHTMLService.prismLanguage(forFenceLabel: codeBlock.language)
         let languageClass = language.isEmpty ? "" : " class=\"language-\(language.htmlEscaped)\""
         result += "<pre\(lineAttrs(codeBlock))><code\(languageClass)>\(codeBlock.code.htmlEscaped)</code></pre>\n"
     }

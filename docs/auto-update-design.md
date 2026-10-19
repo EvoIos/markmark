@@ -2,6 +2,13 @@
 
 > 版本: 1.0 | 最后更新: 2026-06-04
 
+> ⚠️ **当前状态（2026-10-19）：fork 期间已整体关闭。**
+> 本仓库是 `EvoIos/markmark` 的 fork，而实现查询的是上游 `easychen/markmark` 的 Release
+> （`UpdateService` 的 `owner` / `repo`），会把上游包当成新版本一路下载并替换掉 fork 自己的构建。
+> 现由 `UpdateService.isEnabled = false` 统一关闭：设置菜单没有入口、启动不自动检查、不发起任何网络请求。
+> 恢复步骤：① 把 `owner` / `repo` 改为本仓库；② 让本仓库产出 Release（资产名 `MarkMark.dmg` /
+> `MarkMark.zip`，见 `release-local.sh` 与 `.github/workflows/release.yml`）；③ 把 `isEnabled` 改回 `true`。
+
 ## 1. 概述
 
 Markdown Reader 通过 GitHub Releases 分发，当前为 ad-hoc 签名（无 Apple Developer ID 公证）。本文档描述自动更新功能的设计方案：利用 GitHub Releases API 检测新版本，支持 ZIP 自动安装和 DMG 手动安装两种模式。

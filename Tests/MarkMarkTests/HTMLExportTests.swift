@@ -58,11 +58,14 @@ struct HTMLExportTests {
 
     // MARK: - Prism 语言组件排序（离线内联，无 autoloader）
 
-    @Test("php is excluded (needs un-bundled markup-templating plugin)")
-    func prismExcludesPHP() {
-        let langs = HTMLExportService.orderedPrismLanguages(available: ["php", "swift", "python"])
-        #expect(!langs.contains("php"))
-        #expect(langs.contains("swift"))
+    @Test("php is inlined, after the markup-templating it depends on")
+    func prismIncludesPHPAfterMarkupTemplating() {
+        let langs = HTMLExportService.orderedPrismLanguages(
+            available: ["php", "markup-templating", "swift", "python"]
+        )
+        #expect(langs.contains("php"))
+        func idx(_ l: String) -> Int { langs.firstIndex(of: l)! }
+        #expect(idx("markup-templating") < idx("php"))
     }
 
     @Test("dependency providers precede the components that extend them")
@@ -77,10 +80,67 @@ struct HTMLExportTests {
         #expect(idx("typescript") < idx("tsx"))
     }
 
-    @Test("missing dependency providers don't crash ordering")
-    func prismNoProvidersIsFine() {
-        let langs = HTMLExportService.orderedPrismLanguages(available: ["swift", "python", "yaml"])
-        #expect(Set(langs) == ["swift", "python", "yaml"])
+    @Test("ordering holds for dependencies that sort after their dependents")
+    func prismOrderIsNotAlphabetical() {
+        // 按字母序 plsql/vbnet 都排在依赖前面——顺序必须来自依赖图而不是字母序
+        let langs = HTMLExportService.orderedPrismLanguages(
+            available: ["plsql", "sql", "vbnet", "basic", "scala", "java", "objectivec", "c", "json5", "json"]
+        )
+        func idx(_ l: String) -> Int { langs.firstIndex(of: l)! }
+        #expect(idx("plsql") > idx("sql"))
+        #expect(idx("vbnet") > idx("basic"))
+        #expect(idx("scala") > idx("java"))
+        #expect(idx("objectivec") > idx("c"))
+        #expect(idx("json5") > idx("json"))
+    }
+
+    @Test("templating components load after markup-templating (their load-time capture)")
+    func prismTemplatingOrder() {
+        let langs = HTMLExportService.orderedPrismLanguages(
+            available: ["markup-templating", "django", "handlebars", "twig", "liquid", "ejs", "erb", "ruby"]
+        )
+        func idx(_ l: String) -> Int { langs.firstIndex(of: l)! }
+        for dependent in ["django", "handlebars", "twig", "liquid", "ejs", "erb"] {
+            #expect(idx("markup-templating") < idx(dependent), "\(dependent) must follow markup-templating")
+        }
+        #expect(idx("ruby") < idx("erb"))
+    }
+
+    @Test("core and autoloader are never treated as languages")
+    func prismSkipsNonLanguageComponents() {
+        let langs = HTMLExportService.orderedPrismLanguages(
+            available: ["core", "autoloader", "swift"]
+        )
+        #expect(langs == ["swift"])
+    }
+
+    @Test("languages whose dependency is missing are dropped, not ordered")
+    func prismDropsUnloadableLanguages() {
+        // 缺 basic → vbnet 必须被剔除，否则导出页里它会抛错
+        let langs = HTMLExportService.orderedPrismLanguages(available: ["vbnet", "swift", "python"])
+        #expect(!langs.contains("vbnet"))
+        #expect(Set(langs) == ["swift", "python"])
         #expect(HTMLExportService.orderedPrismLanguages(available: []).isEmpty)
+    }
+
+    @Test("with the full table available, every dependency is ordered first")
+    func prismFullGraphOrdering() {
+        var available = Set(HTMLExportService.prismDependencies.keys)
+        for dependencies in HTMLExportService.prismDependencies.values {
+            available.formUnion(dependencies)
+        }
+        let langs = HTMLExportService.orderedPrismLanguages(available: available)
+        #expect(Set(langs) == available.subtracting(HTMLExportService.nonLanguageComponents))
+
+        for (language, dependencies) in HTMLExportService.prismDependencies {
+            guard let position = langs.firstIndex(of: language) else {
+                Issue.record("\(language) is missing from the order")
+                continue
+            }
+            for dependency in dependencies where langs.contains(dependency) {
+                let dependencyPosition = langs.firstIndex(of: dependency)!
+                #expect(dependencyPosition < position, "\(dependency) must precede \(language)")
+            }
+        }
     }
 }

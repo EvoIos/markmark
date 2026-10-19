@@ -136,40 +136,83 @@ enum HTMLExportService {
         return result
     }
 
-    /// prism-<lang> 语言组件资源路径（不含 core / autoloader），按依赖顺序排列。
+    /// 目录里以 `prism-` 开头、但不是语言组件的文件。
     ///
-    /// 导出不使用 autoloader（它需联网/按需取文件），改为内联语言组件，因此必须自己处理：
-    /// 1. 依赖顺序——组件用 `Prism.languages.extend('c', …)` 等，依赖须先加载，否则 extend
-    ///    of undefined 抛错（cpp→c、tsx→jsx+typescript、shell-session→bash）。
-    /// 2. 缺失依赖——`prism-php` 依赖未随包提供的 `markup-templating` 插件，加载即抛
-    ///    `tokenizePlaceholders` TypeError，直接排除（php 代码块退化为无高亮，可接受）。
+    /// `core` 必须排除：重复内联会重建整个 `Prism` 对象、把先加载的语言全部抹掉，
+    /// 之后 `Prism.languages.extend('c', …)` 这类组件随之抛错。
+    static let nonLanguageComponents: Set<String> = ["core", "autoloader"]
+
+    /// Prism 语言组件的依赖表（只列非核心依赖；`markup` / `css` / `clike` / `javascript`
+    /// 由 prism-core 提供）。与随包组件同源：prismjs@1.29.0 的 components.json。
+    static let prismDependencies: [String: [String]] = [
+        "cpp": ["c"],
+        "django": ["markup-templating"],
+        "ejs": ["markup-templating"],
+        "erb": ["ruby", "markup-templating"],
+        "glsl": ["c"],
+        "handlebars": ["markup-templating"],
+        "json5": ["json"],
+        "liquid": ["markup-templating"],
+        "objectivec": ["c"],
+        "opencl": ["c"],
+        "php": ["markup-templating"],
+        "plsql": ["sql"],
+        "scala": ["java"],
+        "shell-session": ["bash"],
+        "tsx": ["jsx", "typescript"],
+        "twig": ["markup-templating"],
+        "vbnet": ["basic"],
+    ]
+
+    /// prism-<lang> 语言组件资源路径，按依赖顺序排列。
+    ///
+    /// 导出不使用 autoloader（它按需取文件），改为把语言组件全部内联，因此顺序必须自己保证。
+    /// 顺序错了不只是那个语言不高亮：`prism-django` 之类组件在**加载时**就捕获
+    /// `Prism.languages["markup-templating"]` 并注册无守卫的 tokenize 钩子，一旦依赖还没加载，
+    /// 它会让整页每一次高亮都抛 TypeError——表现为所有代码块都是灰的。
     private static func prismLanguageResourcePaths() -> [String] {
         guard let jsDir = MarkdownURLSchemeHandler.bundleResourceURL(forPath: "js") else { return [] }
         let files = (try? FileManager.default.contentsOfDirectory(atPath: jsDir.path)) ?? []
         let available = Set(
             files.filter { $0.hasPrefix("prism-") && $0.hasSuffix(".min.js") }
                 .map { String($0.dropFirst("prism-".count).dropLast(".min.js".count)) }
+                .filter { !nonLanguageComponents.contains($0) }
         )
-        if available.contains("php") {
-            logger.info("HTMLExport: prism-php skipped (markup-templating plugin not bundled)")
-        }
         return orderedPrismLanguages(available: available).map { "js/prism-\($0).min.js" }
     }
 
-    /// 纯逻辑：给定可用的 prism 语言组件名集合，返回应内联的语言（按依赖顺序、剔除依赖缺失者）。
+    /// 纯逻辑：给定可用的 prism 语言组件名集合，返回应内联的语言（依赖优先、剔除依赖缺失者）。
     /// 抽出便于单元测试（运行 swift test 时取不到 bundle 资源）。
     static func orderedPrismLanguages(available: Set<String>) -> [String] {
-        // 依赖未随包提供 → 排除（php 需要 markup-templating 插件）
-        let unsatisfiable: Set<String> = ["php"]
-        // 被其他组件 extend 的语言须先加载：cpp→c、shell-session→bash、tsx→jsx+typescript
-        let dependencyProviders = ["c", "bash", "jsx", "typescript"]
-
+        let core: Set<String> = ["markup", "css", "clike", "javascript"]
         var ordered: [String] = []
-        for lang in dependencyProviders where available.contains(lang) && !unsatisfiable.contains(lang) {
-            ordered.append(lang)
+        var resolved: Set<String> = []
+        var visiting: Set<String> = []
+        var unusable: [String: [String]] = [:]
+
+        /// 该语言能否安全内联；可以则按依赖优先追加进 `ordered`。
+        func resolve(_ language: String) -> Bool {
+            if core.contains(language) || resolved.contains(language) { return true }
+            guard available.contains(language) else { return false }
+            guard !visiting.contains(language) else { return false }  // 成环（Prism 里不存在，防御）
+            visiting.insert(language)
+            defer { visiting.remove(language) }
+            for dependency in prismDependencies[language] ?? [] {
+                guard resolve(dependency) else {
+                    unusable[language, default: []].append(dependency)
+                    return false
+                }
+            }
+            resolved.insert(language)
+            ordered.append(language)
+            return true
         }
-        for lang in available.subtracting(ordered).subtracting(unsatisfiable).sorted() {
-            ordered.append(lang)
+
+        for language in available.subtracting(nonLanguageComponents).sorted() {
+            _ = resolve(language)
+        }
+        for (language, dependencies) in unusable.sorted(by: { $0.key < $1.key }) {
+            logger.warning("HTMLExport: prism-\(language) skipped, missing dependency: \(dependencies.joined(separator: ", "))")
         }
         return ordered
     }

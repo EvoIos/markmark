@@ -5,6 +5,10 @@
 #   --sign       签名 .app（非分发模式自动使用可用证书，找不到则 ad-hoc）
 #   --sign ID    分发模式下使用指定签名身份（如 "Developer ID Application: xxx"）
 #   -d           分发模式：启用 hardened runtime + timestamp（需 Developer ID 证书 + 公证）
+# 环境变量:
+#   MARKMARK_SKIP_QUICKLOOK=1           显式跳过 Quick Look 扩展
+#   MARKMARK_INCLUDE_QUICKLOOK_ADHOC=1  ad-hoc 签名时也打包 Quick Look 扩展
+#   VERSION_OVERRIDE=x.y.z              覆盖版本号（默认取 git tag → CHANGELOG）
 
 set -euo pipefail
 
@@ -59,13 +63,28 @@ fi
 echo "🔨 构建 ${APP_NAME} (${CONFIG}, universal: arm64 + x86_64)..."
 
 # Universal 构建：同时编译 Apple Silicon (arm64) 与 Intel (x86_64)。
-# 产物（fat 可执行文件、fat *_Module.o、资源 bundle）落在 .build/apple/Products/<Config>/
+# 产物（fat 可执行文件、fat 目标文件、资源 bundle）位置由下面的 PRODUCTS_DIR 探测
 swift build -c "$CONFIG" --arch arm64 --arch x86_64
 
 # arm64 单架构目录（仅用于个别中间产物）；universal 产物用 PRODUCTS_DIR
 BUILD_DIR="${PROJECT_DIR}/.build/${ARCH}-apple-macosx/${CONFIG}"
 if [ "$CONFIG" = "release" ]; then CONFIG_CAP="Release"; else CONFIG_CAP="Debug"; fi
-PRODUCTS_DIR="${PROJECT_DIR}/.build/apple/Products/${CONFIG_CAP}"
+
+# Universal 产物目录随 SwiftPM 版本变化：
+#   新（Swift 6.2 / Xcode 27 起）：.build/out/Products/<Config>/
+#   旧（Xcode 26 及更早）        ：.build/apple/Products/<Config>/
+# 优先取新布局，并**必须**确认目录存在：旧布局目录可能残留上一次构建的产物，
+# 直接拿来用会把旧二进制打进包里（表现为「改了代码但包没变」）。
+PRODUCTS_DIR="${PROJECT_DIR}/.build/out/Products/${CONFIG_CAP}"
+if [ ! -d "$PRODUCTS_DIR" ] && [ -d "${PROJECT_DIR}/.build/apple/Products/${CONFIG_CAP}" ]; then
+    PRODUCTS_DIR="${PROJECT_DIR}/.build/apple/Products/${CONFIG_CAP}"
+fi
+if [ ! -d "$PRODUCTS_DIR" ]; then
+    echo "❌ 找不到 universal 构建产物目录（已尝试 .build/out/Products 与 .build/apple/Products）"
+    echo "   请确认 swift build --arch arm64 --arch x86_64 是否成功，以及 SwiftPM 产物布局是否又变了"
+    exit 1
+fi
+echo "📦 Universal 产物目录: ${PRODUCTS_DIR#"$PROJECT_DIR"/}"
 
 # 修补 SPM 生成的 resource_bundle_accessor.swift
 # SPM 使用 Bundle.main.bundleURL 查找 bundle，但 macOS .app 的资源在 Contents/Resources/
@@ -219,7 +238,11 @@ if [[ -n "$SIGN_IDENTITY" ]]; then
 fi
 
 INCLUDE_QUICKLOOK=true
-if [[ "$SIGN_IDENTITY" == "-" && "${MARKMARK_INCLUDE_QUICKLOOK_ADHOC:-}" != "1" ]]; then
+if [[ "${MARKMARK_SKIP_QUICKLOOK:-}" == "1" ]]; then
+    INCLUDE_QUICKLOOK=false
+    echo "⚠️  按 MARKMARK_SKIP_QUICKLOOK=1 跳过 Quick Look Extension"
+    /usr/libexec/PlistBuddy -c "Delete :CFBundlePlugIns" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
+elif [[ "$SIGN_IDENTITY" == "-" && "${MARKMARK_INCLUDE_QUICKLOOK_ADHOC:-}" != "1" ]]; then
     INCLUDE_QUICKLOOK=false
     echo "⚠️  ad-hoc 签名下跳过 Quick Look Extension（避免容器 app 被系统杀掉）"
     /usr/libexec/PlistBuddy -c "Delete :CFBundlePlugIns" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
@@ -246,13 +269,17 @@ mkdir -p "${QL_APPEX}/Contents/Resources"
 CLANG=$(xcrun -f clang)
 SDK=$(xcrun --show-sdk-path)
 
-# Universal 链接：使用 .build/apple/Products/<Config>/ 下的 fat（arm64+x86_64）*_Module.o，
+# Universal 链接：使用 PRODUCTS_DIR 下的 fat（arm64+x86_64）目标文件，
 # 配合 clang 同时传 -arch arm64 -arch x86_64，一步产出 universal 的 QL 扩展二进制。
+# 目标文件命名随 SwiftPM 版本变化：新版是 <Target>.o，旧版是 <Target>_Module.o，两种都试。
 QL_MODULE_OBJS=()
-for mod in "${QL_EXT_NAME}_Module" MarkdownReaderKit_Module Markdown_Module \
-           cmark-gfm_Module cmark-gfm-extensions_Module CAtomic_Module; do
-    obj="${PRODUCTS_DIR}/${mod}.o"
-    [ -f "$obj" ] && QL_MODULE_OBJS+=("$obj")
+for mod in "$QL_EXT_NAME" MarkdownReaderKit Markdown cmark-gfm cmark-gfm-extensions CAtomic; do
+    for obj in "${PRODUCTS_DIR}/${mod}.o" "${PRODUCTS_DIR}/${mod}_Module.o"; do
+        if [ -f "$obj" ]; then
+            QL_MODULE_OBJS+=("$obj")
+            break
+        fi
+    done
 done
 
 if [ "${#QL_MODULE_OBJS[@]}" -ge 2 ]; then
@@ -297,7 +324,10 @@ if [ "${#QL_MODULE_OBJS[@]}" -ge 2 ]; then
         echo "   ❌ Extension 链接失败"
     fi
 else
-    echo "⚠️  未找到 Extension 目标文件: $QL_OBJECTS"
+    echo "❌ 未找到 Quick Look Extension 的目标文件（目录: ${PRODUCTS_DIR}）"
+    echo "   需要以下 target 的 .o：${QL_EXT_NAME} MarkdownReaderKit Markdown cmark-gfm cmark-gfm-extensions CAtomic"
+    echo "   如确实要跳过 Quick Look 扩展，请用 MARKMARK_SKIP_QUICKLOOK=1 重新运行"
+    exit 1
 fi
 
 # 复制主应用的资源 bundle 到 Extension（Extension 运行在独立进程中，无法直接访问主 app 的资源）
@@ -386,10 +416,11 @@ if [[ -n "$SIGN_IDENTITY" ]]; then
 
     echo ""
     echo "✅ ${APP_BUNDLE_NAME}.app 已签名: ${APP_BUNDLE}"
-    if $DISTRIBUTION; then
-        echo "   签名身份: ${SIGN_IDENTITY}"
-    else
+    # 注意：非分发模式也可能用开发证书签名，不能一律报 ad-hoc
+    if [[ "$SIGN_IDENTITY" == "-" ]]; then
         echo "   签名身份: ad-hoc (-)"
+    else
+        echo "   签名身份: ${SIGN_IDENTITY}"
     fi
     if ! $DISTRIBUTION; then
         echo ""

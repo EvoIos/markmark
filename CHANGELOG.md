@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.0.21] - 2026-10-19
+
+### 修复
+
+- **大量语言的代码块没有语法高亮（Objective-C 只是其中一例）**：随包的 Prism 语言组件只有 28 个，`objectivec` 等都不在其中，围栏代码块取不到组件（autoloader 请求 `prism-objective-c.min.js` 得到 404），最终整块退化成灰色纯文本。现在补齐 46 个常用语言组件（Objective-C、C#、Lua、Perl、R、Julia、Elixir、Haskell、OCaml、Clojure、Diff、Markdown、CMake、Nginx、Protobuf、Groovy、Gradle、汇编、Solidity、Verilog、VHDL、WASM、CSV、正则，以及 Handlebars / Twig / Django / Liquid / ERB / Pug / EJS 等模板语言，合计 75 个），并归一化文档里常见但 Prism 不认的围栏写法（`objective-c` / `obj-c` → `objectivec`、`c++` → `cpp`、`c#` → `csharp`、`f#` → `fsharp`、`patch` → `diff`、`proto` → `protobuf`、`asm` → `nasm`、`golang` → `go`、`console` → `shell-session`、`zsh` → `bash`、`make` → `makefile`、MySQL / PostgreSQL / SQLite 等方言 → `sql`），并兼容围栏语言后带附加信息的写法（如 `swift` 后跟 `title=…`）与 Pandoc 花括号写法（`{.swift}`）
+- **文档里出现一个 php 代码块，会让整篇的代码高亮全部失效**：`prism-php` 注册的 tokenize 钩子依赖 `markup-templating` 组件，而该组件没有随包，且这个钩子没有守卫——一旦 php 组件被按需加载，之后**每一次**高亮都会抛 TypeError。现已补齐 `markup-templating`，php 代码块恢复高亮
+- **导出的自包含 HTML 里几乎所有代码块都不高亮**：导出把 `core` 当成语言又内联了一次，第二次加载会重建整个 `Prism` 对象、把先前加载的语法全部清空；依赖顺序也来自硬编码的短名单，漏掉了 `plsql → sql`、`scala → java`、`vbnet → basic` 等，而 `django`、`handlebars` 这类组件在**加载时**就捕获依赖，顺序一错会连累整页高亮。现在改为按真实依赖表（与 prismjs@1.29.0 的 components.json 同源）做拓扑排序，依赖缺失的语言主动剔除并在日志中告警，`core` / `autoloader` 不再参与内联
+
+### 变更
+
+- **暂时关闭「检查更新」**：本仓库是 fork，该功能此前查询上游 `easychen/markmark` 的 Release，会把上游包当成新版本一路下载并替换掉 fork 自己的构建。现由 `UpdateService.isEnabled` 统一关闭——设置菜单不再显示「检查更新…」入口、启动不再自动检查、也不发起任何网络请求。待发布地址切到本仓库自己的 Release 后再开启
+
 ## [2.0.20] - 2026-10-18
 
 ### 新增
