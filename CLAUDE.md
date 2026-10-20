@@ -160,6 +160,37 @@ GitHub Actions (`.github/workflows/release.yml`)：
   `swift build --arch arm64`（**仅 arm64** + ad-hoc 签名），正是早期「Intel Mac 打不开」的根因，
   且有编辑模式文字不可见的已知 bug。正式发布**勿用**，务必走上面的本地公证包路径。
 
+## 版本与发布流程（Agent 必读）
+
+**完成一个功能或修复后，默认走完整流程：改版本号 → 提交 → 推送 → 打 tag → 推送 tag。这是常规收尾动作，不需要每次再问「要不要提交/打 tag」。** 只有要对外发布（GitHub Release、上传 DMG）时才先征求确认——见下面「不做的事」。
+
+顺序固定，不要跳步：
+
+1. **改 `CHANGELOG.md`**：在顶部、上一个版本之上新增 `## [X.Y.Z] - YYYY-MM-DD`，按 `新增` / `修复` / `变更` 分类，写清「为什么」而不只是「改了什么」。
+2. **同步 `CLAUDE.md` 的「当前版本」**为同一版本号。其他文件的版本号不要手改：`scripts/Info.plist` 里的 `__VERSION__` 由 `build-app.sh` 构建时填充。
+3. **跑测试**：`swift test`，两个 target（`MarkdownReaderKitTests` / `MarkMarkTests`）全绿才继续。
+4. **提交**：`git add -A`，Conventional Commits 前缀（`feat:` / `fix:` / `docs:` / `refactor:` / `test:` / `chore:`），标题带版本号，正文用中文说明原因。
+5. **推送分支**：`git push origin main`。
+6. **打 annotated tag 并推送**：
+   ```bash
+   git tag -a vX.Y.Z -m "vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+
+版本号按语义化版本递增、不跳号：**修复 → patch**（如 2.0.21 → 2.0.22）；**新增功能 → minor**（如 2.0.22 → 2.1.0）；不兼容变更 → major。历史上功能与修复都发在 `2.0.x`，如确要沿用旧习惯，在同一版本内说清楚即可，但不要倒退或重号。
+
+### 三条硬性约束
+
+- **tag 与 `CHANGELOG.md` 首条版本必须一致**。`build-app.sh` 的版本优先级是 `VERSION_OVERRIDE` > `git tag` > `CHANGELOG.md`，tag 优于 CHANGELOG；两者不一致时不带 `VERSION_OVERRIDE` 构建会打出**旧版本号**的包（这正是 2.0.22 一度要靠 `VERSION_OVERRIDE=2.0.22` 才能构建的原因）。
+- **tag 必须是 annotated 并指向最终提交**（`git tag -a`）。打完 tag 后不要再往该版本追加提交；需要补充改动就升下一个版本。
+- **提交身份只用仓库本地配置**（`zlc <zlc@gmail.com>`）。全局身份属于公司邮箱，绝不能出现在提交或 tag 里；提交前可用 `git log --all --format='%an <%ae> | %cn <%ce>' | grep -i itiger` 自检，应为空。
+
+### 不做的事（必须显式询问）
+
+- 不创建 GitHub Release、不上传 `MarkMark.dmg` / `MarkMark.zip`、不跑 `release-local.sh`。
+  本仓库是 fork，Actions 处于关闭状态，且本机没有 Developer ID 证书与 `markmark` 公证 profile，正式分发条件尚不具备。
+- 不改写已推送的历史、不删除已推送的 tag、不 `push --force`。
+
 ## 已知注意事项
 
 - 同类型视图替换内容时 SwiftUI 可能不触发 `.onAppear`，需用 `.id(fileURL)` 强制重建
