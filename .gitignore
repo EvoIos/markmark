@@ -41,8 +41,9 @@ Carthage/Build/
 # Sisyphus
 .sisyphus/
 
-# Claude Code
-.claude/
+# Claude Code（项目技能入库，其余本地配置不入库）
+.claude/*
+!.claude/skills/
 
 # Build artifacts
 docs/plan.html

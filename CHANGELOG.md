@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.0.23] - 2026-10-20
+
+### 变更
+
+- **发布流程从 `CLAUDE.md` 的散文抽成「步骤 + 可重跑校验」两份文件**：原先流程只有文字描述，没有机器可执行的检查，于是 2.0.22 一度出现 tag 与 `CHANGELOG.md` 不一致、不带 `VERSION_OVERRIDE` 就构建出旧版本号的情况——问题靠人事后回忆发现，而不是靠一条能反复运行的命令拦住。现在拆成三处，各自只放该放的东西：
+  - `.claude/skills/release/SKILL.md`：发布步骤，每一步写明「什么不算通过」（例如 lightweight tag 不算、只跑一个测试 target 不算、校验输出不是 `PASS` 不算完成）
+  - `scripts/check-release.sh`：一条命令校验版本号格式、`CHANGELOG.md` 首条、`CLAUDE.md` 当前版本、tag 是否存在 / 是否 annotated / 是否指向 HEAD、版本是否递增且不重号、提交与 tag 身份、工作区是否干净、是否有未推送提交；输出以 `RELEASE CHECK: PASS` 或 `FAIL (n 项阻断)` 结尾，可反复运行，起草阶段用 `--allow-dirty`
+  - `CLAUDE.md` 只保留不可推导的判断规则（语义化版本习惯、三条硬性约束、必须显式询问的事项），步骤改为指向上面两份文件
+- **`.gitignore` 放行 `.claude/skills/`**：项目级技能需要入库才能被其他会话读到，其余 `.claude/` 内容（本地设置等）仍不入库
+- **沙箱化 agent 会话里 `swift test` 的可用命令**：SwiftPM 编译 manifest 时会调用 `sandbox-exec`，在受限沙箱中直接报 `sandbox_apply: Operation not permitted`，表现为「测试没跑」而不是「测试失败」。可用命令是 `swift test --disable-sandbox --cache-path .build/swiftpm-cache`，已写进发布技能
+
 ## [2.0.22] - 2026-10-20
 
 ### 修复

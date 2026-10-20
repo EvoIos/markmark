@@ -10,7 +10,7 @@ MarkMark 是一个原生 macOS Markdown 阅读器应用（fork 自 [davidhoo/Mar
 > 仍保留 `MarkdownReader` 字样的是：共享库 target `MarkdownReaderKit`、Quick Look 扩展 target/二进制 `MarkdownReaderQL`、以及个别内部 Swift 文件/类型名（如 `MarkdownReaderApp.swift`）——它们是内部模块名，不面向用户，改名会牵动大量 import，故保留。
 > UserDefaults 键与 `Notification.Name` 仍用 `com.markdownreader.*` 前缀（仅作唯一键，改动会清空用户设置）。
 
-- **当前版本**: 2.0.22
+- **当前版本**: 2.0.23
 - **最低部署**: macOS 14.0（自 fork 起从 macOS 26 → 15 → 14 逐步下调；渲染层由 SwiftUI WebView/WebPage 迁移回 WKWebView）
 - **架构**: Universal binary（arm64 + x86_64），Intel 与 Apple Silicon 均原生运行
 - **Bundle ID**: `com.ft07.markmark`
@@ -145,6 +145,8 @@ Swift Package 依赖：**swift-markdown**（传递依赖 swift-cmark）。
 
 ```bash
 swift test
+# 受限沙箱的 agent 会话里 SwiftPM 自带的 sandbox-exec 会被拦，改用：
+swift test --disable-sandbox --cache-path .build/swiftpm-cache
 ```
 
 ## CI/CD
@@ -164,18 +166,7 @@ GitHub Actions (`.github/workflows/release.yml`)：
 
 **完成一个功能或修复后，默认走完整流程：改版本号 → 提交 → 推送 → 打 tag → 推送 tag。这是常规收尾动作，不需要每次再问「要不要提交/打 tag」。** 只有要对外发布（GitHub Release、上传 DMG）时才先征求确认——见下面「不做的事」。
 
-顺序固定，不要跳步：
-
-1. **改 `CHANGELOG.md`**：在顶部、上一个版本之上新增 `## [X.Y.Z] - YYYY-MM-DD`，按 `新增` / `修复` / `变更` 分类，写清「为什么」而不只是「改了什么」。
-2. **同步 `CLAUDE.md` 的「当前版本」**为同一版本号。其他文件的版本号不要手改：`scripts/Info.plist` 里的 `__VERSION__` 由 `build-app.sh` 构建时填充。
-3. **跑测试**：`swift test`，两个 target（`MarkdownReaderKitTests` / `MarkMarkTests`）全绿才继续。
-4. **提交**：`git add -A`，Conventional Commits 前缀（`feat:` / `fix:` / `docs:` / `refactor:` / `test:` / `chore:`），标题带版本号，正文用中文说明原因。
-5. **推送分支**：`git push origin main`。
-6. **打 annotated tag 并推送**：
-   ```bash
-   git tag -a vX.Y.Z -m "vX.Y.Z"
-   git push origin vX.Y.Z
-   ```
+顺序固定，不要跳步。**执行步骤与「什么算没通过」在 `.claude/skills/release/SKILL.md`；可重跑的校验是 `./scripts/check-release.sh`。** 开始收尾前先读这两份，本节只保留不可推导的判断规则。
 
 版本号按语义化版本递增、不跳号：**修复 → patch**（如 2.0.21 → 2.0.22）；**新增功能 → minor**（如 2.0.22 → 2.1.0）；不兼容变更 → major。历史上功能与修复都发在 `2.0.x`，如确要沿用旧习惯，在同一版本内说清楚即可，但不要倒退或重号。
 
