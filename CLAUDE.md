@@ -10,7 +10,7 @@ MarkMark 是一个原生 macOS Markdown 阅读器应用（fork 自 [davidhoo/Mar
 > 仍保留 `MarkdownReader` 字样的是：共享库 target `MarkdownReaderKit`、Quick Look 扩展 target/二进制 `MarkdownReaderQL`、以及个别内部 Swift 文件/类型名（如 `MarkdownReaderApp.swift`）——它们是内部模块名，不面向用户，改名会牵动大量 import，故保留。
 > UserDefaults 键与 `Notification.Name` 仍用 `com.markdownreader.*` 前缀（仅作唯一键，改动会清空用户设置）。
 
-- **当前版本**: 2.0.24
+- **当前版本**: 2.0.25
 - **最低部署**: macOS 14.0（自 fork 起从 macOS 26 → 15 → 14 逐步下调；渲染层由 SwiftUI WebView/WebPage 迁移回 WKWebView）
 - **架构**: Universal binary（arm64 + x86_64），Intel 与 Apple Silicon 均原生运行
 - **Bundle ID**: `com.ft07.markmark`
@@ -149,7 +149,7 @@ swift test
 swift test --disable-sandbox --cache-path .build/swiftpm-cache
 ```
 
-修 bug 的流程（复现 → 根因 → 修 → 同 surface 验证）见 `.claude/skills/bugfix/SKILL.md`；驱动真实 app 前先跑 `./scripts/check-app-fresh.sh`。
+修 bug 的流程（复现 → 根因 → 修 → 同 surface 验证）见 `.claude/skills/bugfix/SKILL.md`；驱动真实 app 前先跑 `./scripts/check-app-fresh.sh`。渲染层（Prism / 高亮 / 主题 token）另跑 `node scripts/test-render.mjs`——`swift test` 看不到代码块实际产出的 token。哪类改动该跑哪条命令，查 `docs/verification.md`。
 
 ## CI/CD
 
@@ -196,4 +196,5 @@ GitHub Actions (`.github/workflows/release.yml`)：
 - `docs/architecture.md` — 详细架构文档
 - `docs/design.md` — UI/UX 设计文档
 - `docs/requirements.md` — 需求追踪（P0/P1/P2）
+- `docs/verification.md` — 改动类型 → 验证命令对照表
 - `CHANGELOG.md` — 版本变更记录

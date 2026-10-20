@@ -25,6 +25,12 @@ description: MarkMark 的版本发布流程：定版本号、写 CHANGELOG、同
    `MarkdownReaderKitTests` 和 `MarkMarkTests` 两个 target 全绿才继续。
    **沙箱化的 agent 会话里不带 `--disable-sandbox` 会报 `sandbox_apply: Operation not permitted`**，那是「测试没跑起来」，不是「测试失败」，更不算通过。只跑了一个 target 也不算通过。
 
+   动过 `Sources/MarkMark/Resources/js/` 就再跑一次渲染回归：
+   ```bash
+   node scripts/test-render.mjs
+   ```
+   必须是 `RENDER TEST: PASS`；`swift test` 看不到 Prism 实际产出的 token。
+
 5. **先校验一次。**
    ```bash
    ./scripts/check-release.sh X.Y.Z --allow-dirty

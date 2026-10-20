@@ -35,13 +35,21 @@ if [[ ! -x "$BIN_PATH" ]]; then
 fi
 
 # 1. 架构：Intel 是已知盲区，只构建 arm64 的包在 Intel 上打不开
+#    必须按完整 token 比，`arm64e` 里也含 "arm64"，子串匹配会放过它
 archs="$(lipo -archs "$BIN_PATH" 2>/dev/null || echo unknown)"
+has_arch() {
+  local one
+  for one in $archs; do
+    [[ "$one" == "$1" ]] && return 0
+  done
+  return 1
+}
 missing=""
 for want in arm64 x86_64; do
-  [[ "$archs" == *"$want"* ]] || missing="$missing $want"
+  has_arch "$want" || missing="$missing $want"
 done
 if [[ -n "$missing" ]]; then
-  fail "架构不全，缺:$missing（当前: $archs）。Intel 与 Apple Silicon 都要能跑"
+  fail "架构不全，缺:${missing}（当前: ${archs}）。Intel 与 Apple Silicon 都要能跑"
 fi
 printf '  ✅ 架构: %s\n' "$archs"
 
@@ -60,7 +68,9 @@ fi
 printf '  ✅ 可执行文件不早于 Sources/ 与 Package.swift\n'
 
 # 3. 版本只做提示：跨版本构建不影响 bug 验证
-app_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST" 2>/dev/null || echo '?')"
+#    PlistBuddy 读不到时会把 "File Doesn't Exist..." 打到 stdout，不能当成版本号
+app_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST" 2>/dev/null || true)"
+[[ "$app_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || app_version="未知"
 changelog_version="$(grep -m1 -o '\[[0-9][0-9.]*\]' "$ROOT_DIR/CHANGELOG.md" 2>/dev/null | tr -d '[]')"
 if [[ -n "$changelog_version" && "$app_version" != "$changelog_version" ]]; then
   printf '  ℹ️  包内版本 %s，CHANGELOG 首条 %s（不影响验证，发版前会对齐）\n' "$app_version" "$changelog_version"

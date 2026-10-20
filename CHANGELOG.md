@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.0.25] - 2026-10-20
+
+### 新增
+
+- **`scripts/test-render.mjs`：渲染结果的回归测试，零依赖**：在 node 里用 `vm` 加载随包的 Prism 组件（路径就是 `Resources/js/` 里那 81 个文件），断言代码块真实产出的 token 类别。2.0.21 和 2.0.22 连着两个版本都是渲染 bug——一个 php 钩子崩溃让整页高亮失效，一个 Objective-C 只剩 operator / punctuation 看着像没高亮——而 `swift test` 与 `PrismLanguageTests` 当时全绿，因为它们测的是「组件在不在、别名对不对」，测不到「这段代码高亮出来是什么样」。现在五组用例锁住：Objective-C 必须产出 `class-name` / `function` / `boolean`，php 在 `markup-templating` 之后不抛错、缺了它必须抛错，swift 与 diff 有基础 token。去掉 `prism-objectivec-extra.js` 会让其中两类断言立刻变红
+- **`docs/verification.md`：改动类型 → 验证命令对照表**：八行，每行一条可直接复制的命令和一个通过标准，另附「什么不算通过」与 surface 清单（渲染管线、代码块高亮、编辑器、导出、Quick Look、命令行工具、窗口路由）。`swift test` 覆盖不到的 surface 占多数，这张表把「该验什么」从记忆变成查表
+- **`scripts/check-skills.sh`：技能自检**：校验 frontmatter 有 `name` / `description`、`name` 与目录名一致、`description` 不超过 1024 字符且写明了触发时机、技能里引用的 `scripts/` 与 `docs/` 路径真实存在、引用的 shell 脚本可执行。技能会越写越多，改一个路径忘了同步另一处，agent 就会照着不存在的命令跑
+
+### 修复
+
+- **`check-app-fresh.sh` 的架构判定与版本读取**：反例测试先用一个 `x86_64 + arm64e` 的假包跑，暴露出两处问题。一是用子串匹配 `*arm64*`，而 `arm64e` 里也含 `arm64`，会放过缺 `arm64` 的包；现改为按完整 token 匹配。二是 `PlistBuddy` 读不到 key 时会把 `File Doesn't Exist, Will Create: ...` 打到 stdout，被当成版本号显示，现改为只接受 `X.Y.Z` 形式的输出
+
 ## [2.0.24] - 2026-10-20
 
 ### 新增

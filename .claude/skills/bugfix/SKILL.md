@@ -20,7 +20,7 @@ description: 修 MarkMark 的缺陷：先在真实 app 上复现、二分定位�
 
 1. **在真实 surface 上复现。**`swift test` 测的是分支行为，不是 bug 不存在。
 
-   常用手段：
+   改哪类东西该跑哪条命令，先查 `docs/verification.md` 的对照表。常用手段：
    - 文件与窗口路由：`open -a MarkMark.app <file>`，再用 `defaults read com.ft07.markmark` 读落盘状态；窗口数量用 `pgrep -x MarkMark` + CGWindowList（`scripts/open-request-regression.sh` 里有现成实现）
    - 渲染 / 高亮 / 主题 / diff：`screencapture -x` 截图对比，必要时往 WKWebView 注 JS 读 DOM
    - Quick Look：`qlmanage -t -s 1200 -o /tmp <file>`（主 app 正常不代表扩展正常）
