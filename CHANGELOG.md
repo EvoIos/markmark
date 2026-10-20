@@ -5,6 +5,12 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.0.26] - 2026-10-20
+
+### 修复
+
+- **`docs/verification.md` 的对照表少了一行**：2.0.25 里编辑该文件时把「Quick Look 扩展」和「版本号、CHANGELOG、tag」两行粘成了一行，Markdown 渲染出来那两行会合并成一条四列错位的记录，照着查表的人会看漏发布校验那一行。现在两行分开，表格十行都是四列。tag v2.0.25 已推送，按「打完 tag 不再追加提交」的约定，这条改动进 2.0.26
+
 ## [2.0.25] - 2026-10-20
 
 ### 新增

@@ -13,7 +13,8 @@
 | 构建产物、架构、签名 | 包是不是当前源码构建的 | `./scripts/check-app-fresh.sh` | `APP FRESH: PASS` |
 | 文件打开、窗口路由、Services、冷/热启动 | 真窗口行为 | `./scripts/open-request-regression.sh MarkMark.app` | 脚本内每条断言都 ✅ |
 | 导出 HTML、自包含资源 | 无 `mr://` 残留 + 依赖顺序 | `swift test --disable-sandbox --filter HTMLExport` | 该 suite 全绿；再人工打开导出文件确认代码块有色 |
-| Quick Look 扩展 | 预览真的生成图 | `qlmanage -t -s 1200 -o /tmp <file.md>` | `/tmp/<file.md>.png` 存在且不是空白 || 版本号、CHANGELOG、tag | 发布一致性 | `./scripts/check-release.sh` | `RELEASE CHECK: PASS` |
+| Quick Look 扩展 | 预览真的生成图 | `qlmanage -t -s 1200 -o /tmp <file.md>` | `/tmp/<file.md>.png` 存在且不是空白 |
+| 版本号、CHANGELOG、tag | 发布一致性 | `./scripts/check-release.sh` | `RELEASE CHECK: PASS` |
 | `.claude/skills/**` | frontmatter 与引用路径 | `./scripts/check-skills.sh` | `SKILLS CHECK: PASS` |
 
 ⚠️ `open-request-regression.sh` 会 `pkill` 正在运行的 MarkMark。跑之前确认没有未保存的编辑。
