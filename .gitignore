@@ -44,6 +44,7 @@ Carthage/Build/
 # Claude Code（项目技能入库，其余本地配置不入库）
 .claude/*
 !.claude/skills/
+!.claude/commands/
 
 # Build artifacts
 docs/plan.html

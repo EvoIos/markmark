@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.0.27] - 2026-10-20
+
+### 新增
+
+- **`/release` 与 `/bugfix` 两个斜杠命令**：技能不是命令——`.claude/skills/*/SKILL.md` 是模型按 description 自己决定要不要读的说明文件，`.claude/commands/*.md` 才是用户能手打的入口。之前只加了技能，所以在 `/` 菜单里敲 `/relea` 什么都出不来。现在补一层薄包装：正文只做一件事，指向对应的 SKILL.md 并交代本次参数，不复述步骤。`.gitignore` 同步放行 `.claude/commands/`
+- **`check-skills.sh` 覆盖到命令层**：除技能外，也校验 `.claude/commands/*.md` 的 frontmatter 有 `description`、正文引用的 `.claude/skills/<name>/SKILL.md` 真实存在。命令指向一个被改名或删掉的技能时，现在会直接报出来
+
+### 变更
+
+- **`CLAUDE.md` 的发布流程补上命令入口**：收尾那一节注明可以直接 `/release`，不必每次人工去读两个文件
+
 ## [2.0.26] - 2026-10-20
 
 ### 修复

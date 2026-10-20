@@ -98,9 +98,40 @@ for file in "${skill_files[@]}"; do
   fi
 done
 
+# 斜杠命令是另一层入口：技能不会被所有 harness 当成命令，
+# 所以 .claude/commands/*.md 是一层薄包装，同样要校验。
+COMMANDS_DIR="$SKILLS_DIR/../commands"
+command_files=("$COMMANDS_DIR"/*.md)
+if (( ${#command_files[@]} > 0 )); then
+  printf '\n  命令\n'
+fi
+for file in "${command_files[@]}"; do
+  cmd="$(basename "$file" .md)"
+  printf '  %s\n' "/$cmd"
+  checked=$((checked + 1))
+  before=$failures
+
+  if [[ "$(head -1 "$file")" != "---" ]]; then
+    fail "缺少 frontmatter（首行必须是 ---）"
+    continue
+  fi
+  description="$(field "$file" description)"
+  if [[ -z "$description" ]]; then
+    fail "frontmatter 缺少 description"
+  fi
+  # 命令体应该指向真实存在的技能，而不是复述一遍
+  while IFS= read -r ref; do
+    [[ -e "$ref" ]] || fail "引用了不存在的技能: $ref"
+  done < <(grep -oE '\.claude/skills/[A-Za-z0-9._-]+/SKILL\.md' "$file" | sort -u)
+
+  if (( failures == before )); then
+    printf '     ✅ 引用与结构正常\n'
+  fi
+done
+
 echo ""
 if (( failures > 0 )); then
   printf 'SKILLS CHECK: FAIL (%d 项)\n' "$failures"
   exit 1
 fi
-printf 'SKILLS CHECK: PASS (%d 个技能)\n' "$checked"
+printf 'SKILLS CHECK: PASS (%d 个技能 / 命令)\n' "$checked"

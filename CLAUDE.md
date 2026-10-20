@@ -10,7 +10,7 @@ MarkMark 是一个原生 macOS Markdown 阅读器应用（fork 自 [davidhoo/Mar
 > 仍保留 `MarkdownReader` 字样的是：共享库 target `MarkdownReaderKit`、Quick Look 扩展 target/二进制 `MarkdownReaderQL`、以及个别内部 Swift 文件/类型名（如 `MarkdownReaderApp.swift`）——它们是内部模块名，不面向用户，改名会牵动大量 import，故保留。
 > UserDefaults 键与 `Notification.Name` 仍用 `com.markdownreader.*` 前缀（仅作唯一键，改动会清空用户设置）。
 
-- **当前版本**: 2.0.26
+- **当前版本**: 2.0.27
 - **最低部署**: macOS 14.0（自 fork 起从 macOS 26 → 15 → 14 逐步下调；渲染层由 SwiftUI WebView/WebPage 迁移回 WKWebView）
 - **架构**: Universal binary（arm64 + x86_64），Intel 与 Apple Silicon 均原生运行
 - **Bundle ID**: `com.ft07.markmark`
@@ -168,7 +168,7 @@ GitHub Actions (`.github/workflows/release.yml`)：
 
 **完成一个功能或修复后，默认走完整流程：改版本号 → 提交 → 推送 → 打 tag → 推送 tag。这是常规收尾动作，不需要每次再问「要不要提交/打 tag」。** 只有要对外发布（GitHub Release、上传 DMG）时才先征求确认——见下面「不做的事」。
 
-顺序固定，不要跳步。**执行步骤与「什么算没通过」在 `.claude/skills/release/SKILL.md`；可重跑的校验是 `./scripts/check-release.sh`。** 开始收尾前先读这两份，本节只保留不可推导的判断规则。
+顺序固定，不要跳步。**执行步骤与「什么算没通过」在 `.claude/skills/release/SKILL.md`（或直接 `/release`）；可重跑的校验是 `./scripts/check-release.sh`。** 开始收尾前先读这两份，本节只保留不可推导的判断规则。
 
 版本号按语义化版本递增、不跳号：**修复 → patch**（如 2.0.21 → 2.0.22）；**新增功能 → minor**（如 2.0.22 → 2.1.0）；不兼容变更 → major。历史上功能与修复都发在 `2.0.x`，如确要沿用旧习惯，在同一版本内说清楚即可，但不要倒退或重号。
 
