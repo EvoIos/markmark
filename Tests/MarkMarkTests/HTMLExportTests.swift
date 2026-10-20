@@ -39,9 +39,13 @@ struct HTMLExportTests {
         #expect(!html.contains("mr://"))
     }
 
+    // 注意：导出时 prism 组件/增强层是从 bundle 里读出来内联的，单元测试进程里
+    // `MarkdownURLSchemeHandler.bundleResourceString` 取不到 app 资源（返回空串），
+    // 所以「增强层是否真的被内联」只能在运行时验证，不在这里断言。
+
+
     @Test("local images are inlined as base64 data URLs")
-    func inlinesLocalImages() throws {
-        let dir = FileManager.default.temporaryDirectory
+    func inlinesLocalImages() throws {        let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("mm-html-export-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }

@@ -98,6 +98,7 @@ public enum MarkdownHTMLService {
             <script>
             Prism.plugins.autoloader.languages_path = 'mr:///js/';
             </script>
+            <script src="mr:///js/prism-objectivec-extra.js"></script>
             \(diffJSON.map { "<script>window.MR_DIFF = \($0);</script>" } ?? "")
             <script src="mr:///js/markdown-reader.js" data-is-dark="\(isDark)"></script>
         </body>
@@ -126,6 +127,7 @@ public enum MarkdownHTMLService {
         <script>
         Prism.plugins.autoloader.languages_path = 'mr:///js/';
         </script>
+        <script src="mr:///js/prism-objectivec-extra.js"></script>
         <script src="mr:///js/markdown-reader.js" data-is-dark="\(isDark)" data-is-quicklook="\(isQuickLook)"></script>
         """
 

@@ -84,3 +84,47 @@ struct PrismLanguageTests {
         #expect(!html.contains("language-{.objc}"))
     }
 }
+
+// MARK: - ObjC 语法增强层
+
+/// Prism 自带的 objectivec 语法对「纯消息发送」代码几乎不产出 token（只剩 operator/punctuation，
+/// 而主题把这两个画成正文色），整块看起来像没高亮。`prism-objectivec-extra.js` 负责补
+/// class-name / function / boolean 三类 token。这里只断言「页面确实引用了这个增强脚本、
+/// 且顺序在 prism 之后」，token 生成本身由 Node 侧验证（见 CHANGELOG 记录的复现脚本）。
+@Suite("ObjC highlighting enhancement wiring")
+struct PrismObjcEnhancementTests {
+
+    private static let scriptTag = "<script src=\"mr:///js/prism-objectivec-extra.js\"></script>"
+
+    @Test("full HTML loads the enhancement script after prism core/autoloader")
+    func fullHTMLIncludesEnhancement() {
+        let html = MarkdownHTMLService.buildFullHTML(
+            content: "```objc\nNSString *a = nil;\n```\n",
+            themeCSS: "",
+            contentPadding: 24,
+            baseURL: nil,
+            isDark: false
+        )
+        #expect(html.contains(Self.scriptTag))
+        let autoloaderRange = html.range(of: "prism-autoloader.min.js")
+        let extraRange = html.range(of: "prism-objectivec-extra.js")
+        #expect(autoloaderRange != nil && extraRange != nil)
+        if let autoloaderRange, let extraRange {
+            #expect(autoloaderRange.lowerBound < extraRange.lowerBound)
+        }
+    }
+
+    @Test("content-aware HTML (rendered view / Quick Look) loads the enhancement script")
+    func contentAwareHTMLIncludesEnhancement() {
+        let html = MarkdownHTMLService.buildContentAwareHTML(
+            content: "```objc\nNSString *a = nil;\n```\n",
+            themeCSS: "",
+            contentPadding: 24,
+            baseURL: nil,
+            isDark: false,
+            hasMermaid: false,
+            hasKaTeX: false
+        )
+        #expect(html.contains(Self.scriptTag))
+    }
+}

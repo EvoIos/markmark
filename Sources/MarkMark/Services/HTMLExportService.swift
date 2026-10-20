@@ -61,6 +61,9 @@ enum HTMLExportService {
         for langPath in prismLanguageResourcePaths() {
             scriptBlock += wrapScript(inlineResourceText(langPath))
         }
+        // ObjC 语法增强层（MarkMark 自有，非语言组件，因此不在上面的 prism-*.min.js 枚举里）。
+        // 只注册一个 before-tokenize 钩子，必须在语言组件之后、任何高亮之前执行。
+        scriptBlock += wrapScript(inlineResourceText("js/prism-objectivec-extra.js"))
         // markdown-reader.js：复用 app 的 prism/katex/mermaid 初始化（webkit 桥接均有守卫，浏览器安全）。
         // - data-mr-config：脚本内联无 src，用此标记让 markdown-reader.js 找到配置
         // - data-readonly：静态导出无法保存标注，关闭选词工具条与评论编辑/删除入口

@@ -5,6 +5,14 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.0.22] - 2026-10-20
+
+### 修复
+
+- **Objective-C 代码块看着还是「一片灰」**：2.0.21 补齐 `objectivec` 组件后语法已经加载，但 Prism 1.29 的该语法只覆盖 `@interface` / `#import` 这类指令、字符串、数字和注释。一段纯消息发送的代码（`NSString *a = [[Manager sharedInstance] pnlType];`）只会产出 `operator` 和 `punctuation` 两类 token，而主题里这两个 token 取的正是正文色，于是整块看起来和没高亮没有区别。新增增强层 `js/prism-objectivec-extra.js`，在语法就绪后补 `class-name`（`NSString`、`TBTradePositionSettingManager` 等首字母大写的类型名）、`function`（`NSLog(` 这类调用、`requestWithQuoteType:` 这类选择器片段）、`boolean`（`YES` / `NO` / `nil` / `NULL`）三类 token；随包的 `prism-objectivec.min.js` 未改动，仍与 upstream 1.29.0 逐字节一致，便于日后整体升级
+  - 增强层通过 `before-tokenize` 钩子生效（组件由 autoloader 异步加载，脚本执行时语法通常还不存在），并把新 grammar 回写进 `env`——`insertBefore` 会替换 grammar 引用，而 `highlightElement` 在跑钩子前已经抓走了旧引用，不回写的话第一个代码块仍按旧语法渲染
+  - 预览 / Quick Look / 导出的自包含 HTML 三条渲染路径都已接入；导出侧因为该文件不是 `prism-<lang>.min.js`，不在语言枚举范围内，需显式内联
+
 ## [2.0.21] - 2026-10-19
 
 ### 修复
