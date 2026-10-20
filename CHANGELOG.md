@@ -5,6 +5,13 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.0.24] - 2026-10-20
+
+### 新增
+
+- **`bugfix` 技能：把「修 bug」从凭感觉改成可核对的因果链**：`.claude/skills/bugfix/SKILL.md` 规定先用 `check-app-fresh.sh` 确认包不是旧的、在真实 surface 上复现、二分定位根因、把复现写成可重跑脚本、在同一个 surface 上验证，并要求红灯复现提交排在修复提交之前。技能里同时列出本项目的四个验证盲区——Universal 架构、WKWebView 里的渲染、Quick Look 独立进程、`.hiddenTitleBar` 全屏行为——这些 `swift test` 一个都覆盖不到，却正好是过去出过问题的地方
+- **`scripts/check-app-fresh.sh`：判断 `MarkMark.app` 是不是当前源码构建的**：核对可执行文件同时含 `x86_64` 与 `arm64`，并比对可执行文件与 `Sources/`、`Package.swift`、`scripts/Info.plist` 的修改时间。拿旧包验证新代码是这类工作最容易得出「修好了」假结论的地方，在这之前没有任何东西能拦住它
+
 ## [2.0.23] - 2026-10-20
 
 ### 变更
